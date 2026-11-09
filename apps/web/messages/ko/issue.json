@@ -356,7 +356,8 @@
     "worklogRemoved": "님이 <v>{date}</v>에 기록된 <v>{time}</v>을(를) 삭제하였습니다",
     "commentEdited": "님이 댓글을 편집하였습니다",
     "commentDeleted": "님이 댓글을 삭제하였습니다",
-    "issueMoved": "님이 이슈를 <v>{from}</v>에서 <v>{to}</v>(으)로 이동하였습니다"
+    "issueMoved": "님이 이슈를 <v>{from}</v>에서 <v>{to}</v>(으)로 이동하였습니다",
+    "agentRunCanceled": "에이전트 실행 #{run}을(를) 취소했습니다"
   },
   "development": {
     "title": "개발",
@@ -563,6 +564,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "실행 취소",
+    "cancelRunConfirm": "대기 중인 이 실행을 취소하시겠습니까? 러너가 이 실행을 가져가지 않습니다.",
+    "cancelReason": "사유 (선택 사항)",
+    "runCanceled": "실행이 취소되었습니다"
   }
 }

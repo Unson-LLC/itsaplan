@@ -356,7 +356,8 @@
     "worklogRemoved": "a supprimé les <v>{time}</v> enregistrées le <v>{date}</v>",
     "commentEdited": "a modifié un commentaire",
     "commentDeleted": "a supprimé un commentaire",
-    "issueMoved": "a déplacé ce ticket de <v>{from}</v> vers <v>{to}</v>"
+    "issueMoved": "a déplacé ce ticket de <v>{from}</v> vers <v>{to}</v>",
+    "agentRunCanceled": "a annulé l’exécution de l’agent n° {run}"
   },
   "development": {
     "title": "Développement",
@@ -563,6 +564,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "Annuler l’exécution",
+    "cancelRunConfirm": "Annuler cette exécution en attente ? Aucun exécuteur ne la prendra en charge.",
+    "cancelReason": "Motif (facultatif)",
+    "runCanceled": "Exécution annulée"
   }
 }

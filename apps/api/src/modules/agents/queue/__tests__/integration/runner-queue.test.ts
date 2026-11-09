@@ -1,7 +1,9 @@
+import { routeTools } from '#mcp/generate';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { db, agentRun } from '@repo/db';
+import { onProjectEvent } from '#modules/webhooks/emit';
+import { db, agentRun, fullPermissions } from '@repo/db';
 import { eq } from 'drizzle-orm';
-import { apiKeyApi, authedApi, createProject } from '#tests/helpers/app';
+import { apiKeyApi, authedApi, createProject, app } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createAgent, teamOf } from '#tests/helpers/agents';
@@ -30,6 +32,7 @@ async function setup() {
   await api.issues({ issueId: issue.id }).comments.post({ body: '@runner start' });
   return {
     api,
+    owner,
     project,
     issue,
     agent: created.data!.agent,
@@ -354,5 +357,207 @@ describe('runner queue', () => {
     expect(await documentRuns(reader)).toHaveLength(0);
     expect((await reader['agent-runs']({ runId: run.id }).trace.get()).status).toBe(404);
     expect(await documentRuns(api)).toHaveLength(1);
+  });
+});
+
+describe('cancel queued runs', () => {
+  beforeEach(resetDb);
+
+  it('cancels a mention run, records actor and reason, and removes it from the waiting count', async () => {
+    const { api, owner, runner, issue } = await setup();
+    const run = (await api['agent-runs'].queue.get()).data!.items[0];
+    expect(run.canCancel).toBe(true);
+    const events: unknown[] = [];
+    const off = onProjectEvent(async ({ type, actor, load }) => {
+      if (type === 'agent_run.finished') events.push({ actor, payloads: await load() });
+    });
+    const result = await api
+      .projects({ projectKey: 'RUN' })
+      ['agent-runs']({ runId: run.id })
+      .cancel.post({ reason: 'No longer needed' })
+      .finally(off);
+    expect(events).toEqual([
+      {
+        actor: owner.userId,
+        payloads: [
+          expect.objectContaining({ id: run.id, status: 'canceled', error: 'No longer needed' }),
+        ],
+      },
+    ]);
+    expect(result.status).toBe(200);
+    expect(result.data).toMatchObject({ id: run.id, status: 'canceled' });
+    expect((await api['agent-runs'].queue.get()).data).toMatchObject({ queued: 0, running: 0 });
+    expect((await runner['agent-runs'].claim.post()).data!.run).toBeNull();
+    const feed = (await api.issues({ issueId: issue.id }).feed.get()).data!;
+    expect(feed.items).toContainEqual(
+      expect.objectContaining({
+        action: 'agent_run_canceled',
+        actorUserId: owner.userId,
+        createdAt: expect.any(Date),
+        payload: expect.objectContaining({
+          subject: { id: run.id, value: String(run.id) },
+          to: { value: 'No longer needed' },
+        }),
+      }),
+    );
+    expect((await api.issues({ issueId: issue.id }).get()).data!.delegateUserId).toBeNull();
+  });
+
+  it('allows an empty reason, rejects a second cancellation and invalid reasons', async () => {
+    const { api } = await setup();
+    const run = (await api['agent-runs'].queue.get()).data!.items[0];
+    const endpoint = api.projects({ projectKey: 'RUN' })['agent-runs']({ runId: run.id }).cancel;
+    expect((await endpoint.post({ reason: 'x'.repeat(2001) })).status).toBe(400);
+    expect((await endpoint.post({})).status).toBe(200);
+    expect((await endpoint.post({})).status).toBe(409);
+    expect(
+      (await api.projects({ projectKey: 'RUN' })['agent-runs']({ runId: 999999 }).cancel.post({}))
+        .status,
+    ).toBe(404);
+  });
+
+  it('rejects claimed runs and runs waiting to retry', async () => {
+    const { api, runner } = await setup();
+    const run = (await runner['agent-runs'].claim.post()).data!.run!;
+    const endpoint = api.projects({ projectKey: 'RUN' })['agent-runs']({ runId: run.id }).cancel;
+    expect((await endpoint.post({})).status).toBe(409);
+    await scheduleRunRetry(run.id, 60_000, 'Retry');
+    expect((await endpoint.post({})).status).toBe(409);
+  });
+
+  it('refuses non-owners even with every permission', async () => {
+    const { api } = await setup();
+    const run = (await api['agent-runs'].queue.get()).data!.items[0];
+    const role = (
+      await createRole(api, 'RUN', {
+        name: 'Full access',
+        permissions: fullPermissions(),
+      })
+    ).data!;
+    const member = await addProjectMember(api, 'RUN', role.id);
+    expect((await member['agent-runs'].queue.get()).data!.items[0].canCancel).toBe(false);
+    expect(
+      (
+        await member
+          .projects({ projectKey: 'RUN' })
+          ['agent-runs']({ runId: run.id })
+          .cancel.post({})
+      ).status,
+    ).toBe(403);
+    expect((await api['agent-runs'].queue.get()).data!.queued).toBe(1);
+  });
+
+  it('does not cancel a run through another project', async () => {
+    const { api, project } = await setup();
+    const run = (await api['agent-runs'].queue.get()).data!.items[0];
+    await api.teams({ teamId: project.teamId }).projects.post({ key: 'OTH', name: 'Other' });
+    expect(
+      (await api.projects({ projectKey: 'OTH' })['agent-runs']({ runId: run.id }).cancel.post({}))
+        .status,
+    ).toBe(404);
+    expect((await api['agent-runs'].queue.get()).data!.queued).toBe(1);
+  });
+});
+
+describe('cancel run boundaries', () => {
+  beforeEach(resetDb);
+
+  it('refuses a finished run', async () => {
+    const { api, runner } = await setup();
+    const run = (await runner['agent-runs'].claim.post()).data!.run!;
+    await runner['agent-runs']({ runId: run.id }).result.post({
+      status: 'success',
+      output: 'Done',
+    });
+    expect(
+      (await api.projects({ projectKey: 'RUN' })['agent-runs']({ runId: run.id }).cancel.post({}))
+        .status,
+    ).toBe(409);
+  });
+
+  it('cancels a delegation run without changing the delegate', async () => {
+    const { api, agent, issue } = await setup();
+    await api
+      .teams({ teamId: await teamOf(api, 'RUN') })
+      ['ai-agents']({ agentId: agent.id })
+      .patch({ triggerOnAssign: true });
+    await api.issues({ issueId: issue.id }).patch({ delegateUserId: agent.userId });
+    const run = (await api['agent-runs'].queue.get()).data!.items.find(
+      (row) => row.trigger === 'delegation',
+    )!;
+    expect(
+      (await api.projects({ projectKey: 'RUN' })['agent-runs']({ runId: run.id }).cancel.post({}))
+        .status,
+    ).toBe(200);
+    expect((await api.issues({ issueId: issue.id }).get()).data!.delegateUserId).toBe(agent.userId);
+  });
+
+  it('lets either the runner or cancellation win, never both', async () => {
+    const { api, runner } = await setup();
+    const run = (await api['agent-runs'].queue.get()).data!.items[0];
+    const [cancel, claim] = await Promise.all([
+      api.projects({ projectKey: 'RUN' })['agent-runs']({ runId: run.id }).cancel.post({}),
+      runner['agent-runs'].claim.post(),
+    ]);
+    expect(claim.status).toBe(200);
+    if (cancel.status === 200) {
+      expect(claim.data!.run).toBeNull();
+    } else {
+      expect(cancel.status).toBe(409);
+      expect(claim.data!.run!.id).toBe(run.id);
+    }
+  });
+});
+
+it('exposes cancellation as a destructive MCP tool with validated arguments', () => {
+  const tool = routeTools(app).find((entry) => entry.name === 'cancel_agent_run');
+  expect(tool).toMatchObject({
+    method: 'POST',
+    path: '/projects/:projectKey/agent-runs/:runId/cancel',
+    annotations: { destructiveHint: true },
+  });
+  expect(tool!.inputSchema.required).toContain('projectKey');
+  expect(tool!.inputSchema.required).toContain('runId');
+  expect(tool!.inputSchema.required).not.toContain('reason');
+});
+
+describe('cancel scheduled internal runs', () => {
+  beforeEach(resetDb);
+  it('cancels an internal run on no issue', async () => {
+    const { api } = await setup();
+    const internal = (
+      await createAgent(api, 'RUN', { name: 'Internal', username: 'internal', kind: 'internal' })
+    ).data!.agent;
+    const schedule = (
+      await api.projects({ projectKey: 'RUN' })['agent-schedules'].post({
+        agentId: internal.id,
+        name: 'Internal daily',
+        cron: '0 9 * * *',
+        prompt: 'Daily work',
+      })
+    ).data!;
+    const run = (
+      await api
+        .projects({ projectKey: 'RUN' })
+        ['agent-schedules']({ scheduleId: schedule.id })
+        .run.post()
+    ).data!;
+    expect(
+      (
+        await api
+          .projects({ projectKey: 'RUN' })
+          ['agent-runs']({ runId: run.runId })
+          .cancel.post({})
+      ).status,
+    ).toBe(200);
+    const ended = (await api['agent-runs'].queue.get()).data!.items.find(
+      (row) => row.id === run.runId,
+    )!;
+    expect(ended).toMatchObject({
+      kind: 'internal',
+      issueId: null,
+      executionState: 'canceled',
+      canCancel: false,
+    });
   });
 });

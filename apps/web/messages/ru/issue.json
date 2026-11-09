@@ -356,7 +356,8 @@
     "worklogRemoved": "удалил(а) запись <v>{time}</v> за <v>{date}</v>",
     "commentEdited": "изменил комментарий",
     "commentDeleted": "удалил комментарий",
-    "issueMoved": "перенёс задачу из <v>{from}</v> в <v>{to}</v>"
+    "issueMoved": "перенёс задачу из <v>{from}</v> в <v>{to}</v>",
+    "agentRunCanceled": "отменил запуск агента №{run}"
   },
   "development": {
     "title": "Разработка",
@@ -563,6 +564,10 @@
     "traceTruncated": "Достигнут лимит записи. Последующие события пропущены; итоговый результат запуска остаётся доступен.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "Этого запуска нет в очереди или к нему нет доступа.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "Отменить запуск",
+    "cancelRunConfirm": "Отменить этот запуск в очереди? Исполнитель не возьмёт его в работу.",
+    "cancelReason": "Причина (необязательно)",
+    "runCanceled": "Запуск отменён"
   }
 }
