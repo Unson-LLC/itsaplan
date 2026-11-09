@@ -357,7 +357,8 @@
     "worklogRemoved": "видалив(-ла) запис <v>{time}</v> за <v>{date}</v>",
     "commentEdited": "змінив коментар",
     "commentDeleted": "видалив коментар",
-    "issueMoved": "переніс задачу з <v>{from}</v> до <v>{to}</v>"
+    "issueMoved": "переніс задачу з <v>{from}</v> до <v>{to}</v>",
+    "agentRunCanceled": "скасував запуск агента №{run}"
   },
   "development": {
     "title": "Розробка",
@@ -564,6 +565,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "Скасувати запуск",
+    "cancelRunConfirm": "Скасувати цей запуск у черзі? Виконавець не візьме його в роботу.",
+    "cancelReason": "Причина (необов’язково)",
+    "runCanceled": "Запуск скасовано"
   }
 }

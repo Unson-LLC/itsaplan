@@ -13,6 +13,7 @@ export const RunnerQueueResponse = t.Object({
   ...pageResponse(
     t.Object({
       ...run.properties,
+      canCancel: t.Boolean(),
       issueId: t.Nullable(t.Number()),
       sequenceNumber: t.Nullable(t.Number()),
       issueTitle: t.Nullable(t.String()),
@@ -40,3 +41,12 @@ export const RunsInFlightResponse = t.Object({
       "The lower of the workspace's own limit and its plan's; 0 when neither is set. The instance's limit, over every workspace, is not in it.",
   }),
 });
+
+export const cancelRunBody = t.Object({
+  reason: t.Optional(t.String({ maxLength: 2000 })),
+});
+export const cancelRunParams = t.Object({
+  projectKey: t.String(),
+  runId: t.Numeric({ minimum: 1, multipleOf: 1 }),
+});
+export const CanceledRunResponse = t.Object({ id: t.Number(), status: t.Literal('canceled') });

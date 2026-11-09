@@ -13,7 +13,16 @@ import { getProjectTeamId } from '#modules/projects/service';
 import { accessErrors, commonErrors, errors } from '#shared/responses';
 import { paginate } from '#shared/pagination';
 import { isMcpRequest } from '#shared/mcp-request';
-import { queueQuery, RunnerQueueResponse, RunsInFlightResponse } from './model';
+import { mcpTool } from '#mcp/generate';
+import { cancelQueuedRun } from './cancel-run';
+import {
+  cancelRunBody,
+  cancelRunParams,
+  CanceledRunResponse,
+  queueQuery,
+  RunnerQueueResponse,
+  RunsInFlightResponse,
+} from './model';
 import {
   listRunnerQueue,
   runsProjectTeam,
@@ -92,6 +101,23 @@ export const runnerQueueRoutes = new Elysia({
       };
     },
   })
+  .post(
+    '/projects/:projectKey/agent-runs/:runId/cancel',
+    ({ project, params, body, user }) =>
+      cancelQueuedRun(project.id, params.runId, requireUser(user).id, body.reason),
+    {
+      projectOwner: true,
+      params: cancelRunParams,
+      body: cancelRunBody,
+      response: { 200: CanceledRunResponse, ...commonErrors, ...errors(409) },
+      detail: {
+        ...mcpTool('cancel_agent_run', { destructiveHint: true }),
+        summary: 'Cancel a queued agent run',
+        description:
+          'Only a project owner may cancel a run that has never started. Running and finished runs return 409. Does not change the issue delegate.',
+      },
+    },
+  )
   .get(
     '/agent-runs/:runId/trace',
     async ({ params, query, projectId }) => {

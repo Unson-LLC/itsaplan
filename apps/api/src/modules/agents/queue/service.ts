@@ -11,7 +11,7 @@ import {
   teamWorkspaceId,
 } from '@repo/db';
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
-import { getTeamAccess, readableProjectIds } from '#shared/access';
+import { getProjectAccess, getTeamAccess, readableProjectIds } from '#shared/access';
 import type { WorkspaceGrant } from '#shared/workspace-roles';
 import { runsTeam } from '#modules/teams/service';
 import { iso } from '#shared/lib';
@@ -80,6 +80,9 @@ export async function listRunnerQueue(
     db
       .select({
         id: agentRun.id,
+        projectId: agentRun.projectId,
+        projectArchivedAt: project.archivedAt,
+        claimedAt: agentRun.claimedAt,
         agentId: agentRun.agentId,
         username: aiAgent.username,
         kind: aiAgent.kind,
@@ -130,18 +133,41 @@ export async function listRunnerQueue(
       .leftJoin(issue, eq(issue.id, agentRun.issueId))
       .where(where),
   ]);
+  const owners = new Set<number>();
+  await Promise.all(
+    [...new Set(rows.map((row) => row.projectId))].map(async (id) => {
+      if ((await getProjectAccess(id, userId))?.role === 'owner') owners.add(id);
+    }),
+  );
   const total = counted[0]?.total ?? 0;
   const running = counted[0]?.running ?? 0;
   return {
-    items: rows.map(({ inputTokens, outputTokens, teamRef, projectKey, ...row }) => ({
-      ...row,
-      projectRef: `${teamRef}.${projectKey}`,
-      ...contextTokensOf({ inputTokens, outputTokens }),
-      createdAt: iso(row.createdAt),
-      nextAttemptAt: iso(row.nextAttemptAt),
-      startedAt: row.startedAt ? iso(row.startedAt) : null,
-      finishedAt: row.finishedAt ? iso(row.finishedAt) : null,
-    })),
+    items: rows.map(
+      ({
+        inputTokens,
+        outputTokens,
+        teamRef,
+        projectKey,
+        projectId,
+        projectArchivedAt,
+        claimedAt,
+        ...row
+      }) => ({
+        ...row,
+        projectRef: `${teamRef}.${projectKey}`,
+        canCancel:
+          owners.has(projectId) &&
+          projectArchivedAt == null &&
+          row.status === 'pending' &&
+          row.startedAt == null &&
+          claimedAt == null,
+        ...contextTokensOf({ inputTokens, outputTokens }),
+        createdAt: iso(row.createdAt),
+        nextAttemptAt: iso(row.nextAttemptAt),
+        startedAt: row.startedAt ? iso(row.startedAt) : null,
+        finishedAt: row.finishedAt ? iso(row.finishedAt) : null,
+      }),
+    ),
     total,
     queued: counted[0]?.queued ?? 0,
     running,

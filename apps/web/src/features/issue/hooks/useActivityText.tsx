@@ -164,6 +164,8 @@ export function useActivityText() {
         return { line: line('commentDeleted') };
       case 'agent_started':
         return { line: line('agentStarted') };
+      case 'agent_run_canceled':
+        return { line: line('agentRunCanceled', { run: subject ?? '' }), popover: to || undefined };
       case 'agent_finished':
         return { line: line(subject === 'failed' ? 'agentFailed' : 'agentFinished') };
       case 'git_pr':

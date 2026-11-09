@@ -357,7 +357,8 @@
     "worklogRemoved": "حذف تسجيل <v>{time}</v> ليوم <v>{date}</v>",
     "commentEdited": "عدّل تعليقًا",
     "commentDeleted": "حذف تعليقًا",
-    "issueMoved": "نقل هذه المهمة من <v>{from}</v> إلى <v>{to}</v>"
+    "issueMoved": "نقل هذه المهمة من <v>{from}</v> إلى <v>{to}</v>",
+    "agentRunCanceled": "ألغى تشغيل الوكيل رقم {run}"
   },
   "development": {
     "title": "التطوير",
@@ -564,6 +565,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "إلغاء التشغيل",
+    "cancelRunConfirm": "هل تريد إلغاء هذا التشغيل المنتظر؟ لن يلتقطه أي مشغّل.",
+    "cancelReason": "السبب (اختياري)",
+    "runCanceled": "تم إلغاء التشغيل"
   }
 }

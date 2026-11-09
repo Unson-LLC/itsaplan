@@ -201,6 +201,16 @@ Each of the three scopes also answers `.../agent-runs/in-flight`: the workspace'
 internal runs holding a slot in the workspace. A run in retry backoff holds a slot, so this count
 can differ from the queue's `running` count.
 
+A project owner can cancel one run with
+`POST /projects/:projectKey/agent-runs/:runId/cancel` or the MCP tool `cancel_agent_run`.
+The body accepts an optional `reason` of up to 2,000 characters. Only a pending run that has
+never started and has no claim can be canceled; a started or finished run returns 409.
+This applies to every trigger and both agent kinds, including runs without an issue.
+The queue detail shows **Cancel run** only to owners of an active project and asks for confirmation.
+Cancellation preserves the issue's delegate, records the actor, time, run ID, and reason in
+its activity feed, emits `agent_run.finished` with status `canceled`, and removes the run from
+the waiting count. Runs of an issue moved to another project return 404.
+
 ## Concurrency limits
 
 Two limits hold the runs of internal agents in flight. An external agent's run counts against
