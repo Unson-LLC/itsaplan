@@ -155,11 +155,20 @@ async function canceled(res: Response): Promise<boolean> {
 function retryAfterMs(header: string | null): number | undefined {
   if (header === null) return undefined;
   const value = header.trim();
+  let ms: number;
   if (/^\d+$/.test(value)) {
-    const ms = Number(value) * 1000;
-    return Number.isFinite(ms) ? ms : undefined;
+    ms = Number(value) * 1000;
+  } else {
+    if (
+      !/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(
+        value,
+      )
+    ) {
+      return undefined;
+    }
+    const date = new Date(value);
+    if (date.toUTCString() !== value) return undefined;
+    ms = date.getTime() - Date.now();
   }
-  if (/^[+-]?[\d.]+$/.test(value)) return undefined;
-  const ms = Date.parse(value) - Date.now();
-  return Number.isFinite(ms) ? Math.max(0, ms) : undefined;
+  return ms > 0 && ms <= 60_000 ? ms : undefined;
 }

@@ -95,11 +95,19 @@ export function errorAnswer(
   error: unknown,
 ): { status: number; body: { error: string; code?: string }; headers?: Record<string, string> } {
   if (error instanceof APIError && error.statusCode === 429) {
-    const retryAfter = new Headers(error.headers).get('Retry-After');
+    const headers: Record<string, string> = {};
+    if (error.body?.code === 'RATE_LIMITED') {
+      const retryAfter = new Headers(error.headers).get('Retry-After');
+      const tryAgainIn = error.body.details?.tryAgainIn;
+      if (retryAfter !== null) headers['Retry-After'] = retryAfter;
+      else if (typeof tryAgainIn === 'number' && Number.isFinite(tryAgainIn)) {
+        headers['Retry-After'] = String(Math.ceil(tryAgainIn / 1000));
+      }
+    }
     return {
       status: 429,
-      body: { error: 'Rate limit exceeded.', code: 'RATE_LIMITED' },
-      headers: retryAfter === null ? {} : { 'Retry-After': retryAfter },
+      body: { error: error.message, code: error.body?.code },
+      headers,
     };
   }
   if (error instanceof HttpError) {

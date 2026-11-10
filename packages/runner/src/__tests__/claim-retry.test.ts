@@ -14,6 +14,23 @@ for (const feed of ['agent-runs', 'agent-chats']) {
       deadlineMs: 4000,
     },
     { name: 'no header', header: () => undefined, waitMs: 5000, deadlineMs: 8000 },
+    ...[
+      '0',
+      '1.5',
+      '-3',
+      '61',
+      '86400',
+      '2147484',
+      '99999999999999999999',
+      '2099-01-01T00:00:00.000Z',
+      'Sun, 06 Nov 1994 08:49:37 GMT',
+      'Wed, 32 Nov 2026 00:00:00 GMT',
+    ].map((header) => ({
+      name: `rejected header ${header}`,
+      header: () => header,
+      waitMs: 5000,
+      deadlineMs: 8000,
+    })),
     { name: 'an invalid header', header: () => 'invalid', waitMs: 5000, deadlineMs: 8000 },
   ]) {
     it(`retries ${feed}/claim after ${scenario.name}`, async () => {

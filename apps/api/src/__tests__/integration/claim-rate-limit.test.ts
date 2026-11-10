@@ -40,6 +40,9 @@ for (const feed of ['agent-runs', 'agent-chats']) {
       }),
     );
     expect(response.status).toBe(429);
+    const retryAfter = Number(response.headers.get('Retry-After'));
+    expect(retryAfter).toBeGreaterThanOrEqual(59);
+    expect(retryAfter).toBeLessThanOrEqual(60);
     expect(await response.json()).toMatchObject({
       error: 'Rate limit exceeded.',
       code: 'RATE_LIMITED',
