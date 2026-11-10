@@ -79,3 +79,41 @@ describe('num', () => {
     expect(num(3)).toBe(3);
   });
 });
+
+describe('rate-limited authentication', () => {
+  it('preserves 429 and only its Retry-After response header', async () => {
+    const { APIError } = await import('better-auth/api');
+    const { errorAnswer } = await import('../../lib');
+    const error = new APIError(
+      'TOO_MANY_REQUESTS',
+      {
+        message: 'Rate limit exceeded.',
+        code: 'RATE_LIMITED',
+      },
+      { 'Retry-After': '17', 'Set-Cookie': 'private=value' },
+    );
+    expect(errorAnswer('UNKNOWN', error)).toEqual({
+      status: 429,
+      body: { error: 'Rate limit exceeded.', code: 'RATE_LIMITED' },
+      headers: { 'Retry-After': '17' },
+    });
+  });
+
+  it('returns 429 without inventing Retry-After when absent', async () => {
+    const { APIError } = await import('better-auth/api');
+    const { errorAnswer } = await import('../../lib');
+    expect(
+      errorAnswer(
+        'UNKNOWN',
+        new APIError('TOO_MANY_REQUESTS', {
+          message: 'Rate limit exceeded.',
+          code: 'RATE_LIMITED',
+        }),
+      ),
+    ).toEqual({
+      status: 429,
+      body: { error: 'Rate limit exceeded.', code: 'RATE_LIMITED' },
+      headers: {},
+    });
+  });
+});

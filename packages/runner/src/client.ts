@@ -40,6 +40,7 @@ export class RequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
@@ -66,6 +67,7 @@ export class Client {
       throw new RequestError(
         res.status,
         `POST ${path} failed with ${res.status}: ${(await res.text()).slice(0, 200)}`,
+        retryAfterMs(res.headers.get('Retry-After')),
       );
     }
     return res;
@@ -148,4 +150,16 @@ export class Client {
 async function canceled(res: Response): Promise<boolean> {
   const body = (await res.json().catch(() => ({}))) as { canceled?: boolean };
   return body.canceled === true;
+}
+
+function retryAfterMs(header: string | null): number | undefined {
+  if (header === null) return undefined;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) {
+    const ms = Number(value) * 1000;
+    return Number.isFinite(ms) ? ms : undefined;
+  }
+  if (/^[+-]?[\d.]+$/.test(value)) return undefined;
+  const ms = Date.parse(value) - Date.now();
+  return Number.isFinite(ms) ? Math.max(0, ms) : undefined;
 }
