@@ -1,0 +1,37 @@
+{
+  "title": "Decisions",
+  "description": "Approvals and tasks only you can do, from every project you can read. What you record here is kept on the issue as your own decision.",
+  "loadFailed": "Could not load your decisions.",
+  "retry": "Try again",
+  "empty": "Nothing is waiting for you.",
+  "someone": "someone",
+  "kind": {
+    "approval": "Approval",
+    "owner_task": "Your own task"
+  },
+  "requestedBy": "Asked by {name} · {time}",
+  "notePlaceholder": "Note (optional)",
+  "action": {
+    "approved": "Approve",
+    "rejected": "Reject",
+    "done": "Mark done"
+  },
+  "recorded": {
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "done": "Marked done"
+  },
+  "panel": {
+    "title": "Decisions",
+    "waiting": "{kind} · waiting for {name}",
+    "by": "{name} · {time}",
+    "outcome": {
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "done": "Done"
+    },
+    "revoke": "Revoke",
+    "revoked": "Revoked {time}",
+    "revokedToast": "Approval revoked"
+  }
+}

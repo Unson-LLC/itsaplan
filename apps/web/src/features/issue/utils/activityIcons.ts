@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   Calendar,
   CircleDot,
+  ClipboardCheck,
   CirclePlus,
   FileText,
   FolderInput,
@@ -63,4 +64,8 @@ export const ACTION_ICON: Record<ActivityAction, LucideIcon> = {
   agent_finished: Bot,
   comment_edited: MessageSquare,
   comment_deleted: MessageSquare,
+  decision_requested: ClipboardCheck,
+  decision_request_cancelled: ClipboardCheck,
+  decided: ClipboardCheck,
+  decision_revoked: ClipboardCheck,
 };

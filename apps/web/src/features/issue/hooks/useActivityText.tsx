@@ -148,6 +148,24 @@ export function useActivityText() {
           line: rich('worklogChanged', { from, fromDate: fromDay, to, date: toDay }),
         };
       }
+      // subject carries the kind of request: 'approval' or 'owner_task'.
+      case 'decision_requested':
+        return {
+          line: rich(
+            subject === 'owner_task' ? 'decisionRequestedTask' : 'decisionRequestedApproval',
+            {
+              name: to ?? '',
+            },
+          ),
+        };
+      case 'decision_request_cancelled':
+        return { line: rich('decisionRequestCancelled', { name: from ?? '' }) };
+      case 'decided':
+        if (to === 'approved') return { line: rich('decidedApproved') };
+        if (to === 'rejected') return { line: rich('decidedRejected') };
+        return { line: rich('decidedDone') };
+      case 'decision_revoked':
+        return { line: rich('decisionRevoked') };
       case 'field':
         if (isLongValue(to))
           return { line: rich('fieldUpdated', { field: subject ?? '' }), popover: to };
