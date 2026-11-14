@@ -175,7 +175,7 @@ export const agentChatRoutes = new Elysia({ name: 'agent-chat', detail: { tags: 
 
   .post('/agent-chats/claim', async ({ agent }) => ({ message: await claimNextMessage(agent) }), {
     runnerAgent: true,
-    response: { 200: ClaimChatResponse, ...errors(401, 403, 409) },
+    response: { 200: ClaimChatResponse, ...errors(401, 403, 409, 429) },
     detail: {
       summary: 'Claim the next chat message',
       description:

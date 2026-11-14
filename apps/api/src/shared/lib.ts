@@ -1,3 +1,5 @@
+import { APIError } from 'better-auth/api';
+
 // Shared helpers for the planner API (projects, issues, and their dependent
 // entities). Each feature folder under modules/ holds a service.ts (Drizzle data
 // access) and an index.ts (Elysia routes) that exposes it over HTTP.
@@ -91,7 +93,23 @@ export function rethrowDuplicate(err: unknown, what: string): never {
 export function errorAnswer(
   code: unknown,
   error: unknown,
-): { status: number; body: { error: string; code?: string } } {
+): { status: number; body: { error: string; code?: string }; headers?: Record<string, string> } {
+  if (error instanceof APIError && error.statusCode === 429) {
+    const headers: Record<string, string> = {};
+    if (error.body?.code === 'RATE_LIMITED') {
+      const retryAfter = new Headers(error.headers).get('Retry-After');
+      const tryAgainIn = error.body.details?.tryAgainIn;
+      if (retryAfter !== null) headers['Retry-After'] = retryAfter;
+      else if (typeof tryAgainIn === 'number' && Number.isFinite(tryAgainIn)) {
+        headers['Retry-After'] = String(Math.ceil(tryAgainIn / 1000));
+      }
+    }
+    return {
+      status: 429,
+      body: { error: error.message, code: error.body?.code },
+      headers,
+    };
+  }
   if (error instanceof HttpError) {
     const body = error.code ? { error: error.message, code: error.code } : { error: error.message };
     return { status: error.status, body };

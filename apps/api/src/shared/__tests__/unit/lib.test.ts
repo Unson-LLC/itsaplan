@@ -79,3 +79,93 @@ describe('num', () => {
     expect(num(3)).toBe(3);
   });
 });
+
+describe('rate-limited authentication', () => {
+  it('preserves 429 and only its Retry-After response header', async () => {
+    const { APIError } = await import('better-auth/api');
+    const { errorAnswer } = await import('../../lib');
+    const error = new APIError(
+      'TOO_MANY_REQUESTS',
+      {
+        message: 'Rate limit exceeded.',
+        code: 'RATE_LIMITED',
+        details: { tryAgainIn: 1000 },
+      },
+      { 'Retry-After': '17', 'Set-Cookie': 'private=value' },
+    );
+    expect(errorAnswer('UNKNOWN', error)).toEqual({
+      status: 429,
+      body: { error: 'Rate limit exceeded.', code: 'RATE_LIMITED' },
+      headers: { 'Retry-After': '17' },
+    });
+  });
+
+  it('returns 429 without inventing Retry-After when absent', async () => {
+    const { APIError } = await import('better-auth/api');
+    const { errorAnswer } = await import('../../lib');
+    expect(
+      errorAnswer(
+        'UNKNOWN',
+        new APIError('TOO_MANY_REQUESTS', {
+          message: 'Rate limit exceeded.',
+          code: 'RATE_LIMITED',
+        }),
+      ),
+    ).toEqual({
+      status: 429,
+      body: { error: 'Rate limit exceeded.', code: 'RATE_LIMITED' },
+      headers: {},
+    });
+  });
+});
+
+describe('API key rate-limit details', () => {
+  for (const tryAgainIn of [1001, 60_000]) {
+    it(`rounds ${tryAgainIn} milliseconds up to seconds`, async () => {
+      const { APIError } = await import('better-auth/api');
+      const { errorAnswer } = await import('../../lib');
+      const error = new APIError('TOO_MANY_REQUESTS', {
+        message: 'Wait before retrying',
+        code: 'RATE_LIMITED',
+        details: { tryAgainIn },
+      });
+      expect(errorAnswer('UNKNOWN', error)).toEqual({
+        status: 429,
+        body: { error: 'Wait before retrying', code: 'RATE_LIMITED' },
+        headers: { 'Retry-After': String(Math.ceil(tryAgainIn / 1000)) },
+      });
+    });
+  }
+
+  for (const tryAgainIn of [undefined, '1000', NaN, Infinity, -Infinity]) {
+    it(`does not derive a retry header from ${tryAgainIn}`, async () => {
+      const { APIError } = await import('better-auth/api');
+      const { errorAnswer } = await import('../../lib');
+      const error = new APIError('TOO_MANY_REQUESTS', {
+        message: 'Wait before retrying',
+        code: 'RATE_LIMITED',
+        details: { tryAgainIn },
+      });
+      expect(errorAnswer('UNKNOWN', error).headers).toEqual({});
+    });
+  }
+
+  it('preserves usage exhaustion without a retry header', async () => {
+    const { APIError } = await import('better-auth/api');
+    const { errorAnswer } = await import('../../lib');
+    const error = new APIError(
+      'TOO_MANY_REQUESTS',
+      {
+        message: 'API Key has reached its usage limit',
+        code: 'USAGE_EXCEEDED',
+        details: { tryAgainIn: 1000 },
+      },
+      { 'Retry-After': '17' },
+    );
+    expect(errorAnswer('UNKNOWN', error)).toEqual({
+      status: 429,
+      body: { error: 'API Key has reached its usage limit', code: 'USAGE_EXCEEDED' },
+      headers: {},
+    });
+  });
+});
