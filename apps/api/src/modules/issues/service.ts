@@ -1,3 +1,4 @@
+import { usesAssignmentQueue } from './assignment-queue';
 import {
   db,
   project as projectTable,
@@ -1004,6 +1005,8 @@ async function assertAssignments(
   patch: { assigneeUserId?: string | null; delegateUserId?: string | null },
 ): Promise<void> {
   if (patch.assigneeUserId) {
+    if (await usesAssignmentQueue(projectId))
+      throw new HttpError(400, 'Set the Assignment queue field instead of an assignee');
     const role = await getMembership(projectId, patch.assigneeUserId);
     if (!role) throw new HttpError(400, 'Assignee must be a project member');
   }
@@ -1145,7 +1148,9 @@ export async function createIssue(
   await assertIssueLabels(project.id, input.labelIds);
   // An issue created in a column enters it the same way a moved one does, so the
   // column's auto-assignee applies. An assignee sent with the create wins over it.
-  const assigneeUserId = input.assigneeUserId ?? (await columnAutoAssignee(input.columnId));
+  const assigneeUserId = (await usesAssignmentQueue(project.id))
+    ? null
+    : (input.assigneeUserId ?? (await columnAutoAssignee(input.columnId)));
   const { id: issueId, createdAt } = await db.transaction(async (tx) => {
     const [seqRow] = await tx
       .update(projectTable)
@@ -1330,7 +1335,9 @@ export async function updateIssue(
 
   // An assignee sent with the same move wins over the column's auto-assignee.
   const autoAssignee =
-    movedToColumnId !== null && patch.assigneeUserId === undefined
+    movedToColumnId !== null &&
+    patch.assigneeUserId === undefined &&
+    !(await usesAssignmentQueue(before.projectId))
       ? await columnAutoAssignee(movedToColumnId)
       : null;
 
