@@ -1758,6 +1758,67 @@ export const issueWatcher = pgTable(
   (t) => [primaryKey({ columns: [t.issueId, t.userId] })],
 );
 
+// A person asked to decide on an issue: approve or reject it ('approval'), or do a
+// piece of work only they can do and mark it done ('owner_task'). At most one open
+// request per issue; recording the decision removes it.
+export const issueDecisionRequest = pgTable(
+  'issue_decision_request',
+  {
+    issueId: integer('issue_id')
+      .primaryKey()
+      .references(() => issue.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    summary: text('summary').notNull(),
+    // Exactly what is to be approved, as key/value pairs (repository, head, action…), so a
+    // reader can match the decision against the work it is about to do.
+    target: jsonb('target').$type<Record<string, string>>().notNull().default({}),
+    requestedByUserId: text('requested_by_user_id').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    requestedByName: text('requested_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('issue_decision_request_kind_check', sql`${t.kind} IN ('approval', 'owner_task')`),
+    index('issue_decision_request_user_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+// What a person decided, append-only. A row is written only from a signed-in browser
+// session, never with an API key or an MCP token (see modules/decisions), so a bot
+// that holds the person's key can comment as them but cannot write a decision.
+// summary and target are the request it answered, as they read at that moment.
+export const issueDecision = pgTable(
+  'issue_decision',
+  {
+    id: serial('id').primaryKey(),
+    issueId: integer('issue_id')
+      .notNull()
+      .references(() => issue.id, { onDelete: 'cascade' }),
+    actorUserId: text('actor_user_id').references(() => user.id, { onDelete: 'set null' }),
+    actorName: text('actor_name').notNull(),
+    kind: text('kind').notNull(),
+    outcome: text('outcome').notNull(),
+    summary: text('summary').notNull(),
+    target: jsonb('target').$type<Record<string, string>>().notNull().default({}),
+    note: text('note').notNull().default(''),
+    // Set once when the person withdraws an approval. The row is otherwise never changed.
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('issue_decision_kind_check', sql`${t.kind} IN ('approval', 'owner_task')`),
+    check(
+      'issue_decision_outcome_check',
+      sql`(${t.kind} = 'approval' AND ${t.outcome} IN ('approved', 'rejected')) OR (${t.kind} = 'owner_task' AND ${t.outcome} = 'done')`,
+    ),
+    index('issue_decision_issue_idx').on(t.issueId, t.createdAt.desc(), t.id.desc()),
+  ],
+);
+
 export const issueFieldValue = pgTable(
   'issue_field_value',
   {

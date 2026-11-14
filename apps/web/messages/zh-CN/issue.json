@@ -357,7 +357,14 @@
     "worklogRemoved": "删除了 <v>{date}</v> 的 <v>{time}</v>",
     "commentEdited": "编辑了一条评论",
     "commentDeleted": "删除了一条评论",
-    "issueMoved": "将此事项从 <v>{from}</v> 移动到 <v>{to}</v>"
+    "issueMoved": "将此事项从 <v>{from}</v> 移动到 <v>{to}</v>",
+    "decisionRequestedApproval": "asked <v>{name}</v> for approval",
+    "decisionRequestedTask": "asked <v>{name}</v> to do a task only they can do",
+    "decisionRequestCancelled": "withdrew the decision request to <v>{name}</v>",
+    "decidedApproved": "<v>approved</v> the request",
+    "decidedRejected": "<v>rejected</v> the request",
+    "decidedDone": "marked the requested task <v>done</v>",
+    "decisionRevoked": "<v>revoked</v> their approval"
   },
   "development": {
     "title": "开发",

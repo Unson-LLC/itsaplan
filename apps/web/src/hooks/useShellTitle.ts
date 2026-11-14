@@ -9,6 +9,7 @@ import { titlePath, useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const SECTION_LABELS = {
   inbox: 'inbox',
+  decisions: 'decisions',
   dashboards: 'dashboards',
   initiatives: 'initiatives',
   cycles: 'cycles',

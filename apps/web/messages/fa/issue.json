@@ -357,7 +357,14 @@
     "worklogRemoved": "<v>{time}</v> ثبت‌شده در <v>{date}</v> را حذف کرد",
     "commentEdited": "یک دیدگاه را ویرایش کرد",
     "commentDeleted": "یک دیدگاه را حذف کرد",
-    "issueMoved": "این تسک را از <v>{from}</v> به <v>{to}</v> منتقل کرد"
+    "issueMoved": "این تسک را از <v>{from}</v> به <v>{to}</v> منتقل کرد",
+    "decisionRequestedApproval": "asked <v>{name}</v> for approval",
+    "decisionRequestedTask": "asked <v>{name}</v> to do a task only they can do",
+    "decisionRequestCancelled": "withdrew the decision request to <v>{name}</v>",
+    "decidedApproved": "<v>approved</v> the request",
+    "decidedRejected": "<v>rejected</v> the request",
+    "decidedDone": "marked the requested task <v>done</v>",
+    "decisionRevoked": "<v>revoked</v> their approval"
   },
   "development": {
     "title": "توسعه",

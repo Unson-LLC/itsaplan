@@ -357,7 +357,14 @@
     "worklogRemoved": "<v>{date}</v> tarihinde kaydedilen <v>{time}</v> süresini sildi",
     "commentEdited": "bir yorumu düzenledi",
     "commentDeleted": "bir yorumu sildi",
-    "issueMoved": "bu işi <v>{from}</v> projesinden <v>{to}</v> projesine taşıdı"
+    "issueMoved": "bu işi <v>{from}</v> projesinden <v>{to}</v> projesine taşıdı",
+    "decisionRequestedApproval": "asked <v>{name}</v> for approval",
+    "decisionRequestedTask": "asked <v>{name}</v> to do a task only they can do",
+    "decisionRequestCancelled": "withdrew the decision request to <v>{name}</v>",
+    "decidedApproved": "<v>approved</v> the request",
+    "decidedRejected": "<v>rejected</v> the request",
+    "decidedDone": "marked the requested task <v>done</v>",
+    "decisionRevoked": "<v>revoked</v> their approval"
   },
   "development": {
     "title": "Geliştirme",

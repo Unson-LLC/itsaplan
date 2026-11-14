@@ -357,7 +357,14 @@
     "worklogRemoved": "ha quitado los <v>{time}</v> registrados el <v>{date}</v>",
     "commentEdited": "editó un comentario",
     "commentDeleted": "eliminó un comentario",
-    "issueMoved": "movió esta incidencia de <v>{from}</v> a <v>{to}</v>"
+    "issueMoved": "movió esta incidencia de <v>{from}</v> a <v>{to}</v>",
+    "decisionRequestedApproval": "asked <v>{name}</v> for approval",
+    "decisionRequestedTask": "asked <v>{name}</v> to do a task only they can do",
+    "decisionRequestCancelled": "withdrew the decision request to <v>{name}</v>",
+    "decidedApproved": "<v>approved</v> the request",
+    "decidedRejected": "<v>rejected</v> the request",
+    "decidedDone": "marked the requested task <v>done</v>",
+    "decisionRevoked": "<v>revoked</v> their approval"
   },
   "development": {
     "title": "Desarrollo",

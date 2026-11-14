@@ -321,6 +321,10 @@ export const qk = {
   // The time entries of one issue. Their sum comes with the issue, so a write
   // refreshes that read too.
   worklogs: (id: number) => ['worklogs', id] as const,
+  // The decisions recorded on one issue, and the caller's open requests across projects.
+  issueDecisions: (id: number) => ['issueDecisions', id] as const,
+  decisionQueue: ['decisionQueue'] as const,
+  decisionQueuePage: (params: unknown) => ['decisionQueue', params] as const,
   // A project's inbox notifications (the list, scoped by the active filters) and the
   // project's unread count (the sidebar badge + live-refresh target).
   notifications: (projectKey: string, filters?: unknown) =>
