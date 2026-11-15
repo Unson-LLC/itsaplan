@@ -9,6 +9,7 @@ export type DecisionOutcome = 'approved' | 'rejected' | 'done';
 // A member asked to decide on an issue. target names exactly what is decided on
 // (repository, head, environment, …); it may be empty.
 export interface DecisionRequest {
+  revision: string;
   issueId: number;
   userId: string;
   userName: string | null;
@@ -57,7 +58,7 @@ export const listIssueDecisions = (issueId: number) =>
 
 export const recordDecision = (
   issueId: number,
-  input: { outcome: DecisionOutcome; note?: string },
+  input: { requestRevision: string; outcome: DecisionOutcome; note?: string },
 ) =>
   request<Decision>(`/issues/${issueId}/decisions`, {
     method: 'POST',

@@ -1767,6 +1767,7 @@ export const issueDecisionRequest = pgTable(
     issueId: integer('issue_id')
       .primaryKey()
       .references(() => issue.id, { onDelete: 'cascade' }),
+    revision: uuid('revision').notNull().defaultRandom(),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),

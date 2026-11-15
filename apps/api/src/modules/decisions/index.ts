@@ -148,6 +148,7 @@ export const decisionRoutes = new Elysia({ name: 'decisions', detail: { tags: ['
       const me = requireUser(user).id;
       await assertSignedInPerson(request, me);
       const decision = await recordDecision({
+        requestRevision: body.requestRevision,
         issueId: params.issueId,
         actorUserId: me,
         outcome: body.outcome,

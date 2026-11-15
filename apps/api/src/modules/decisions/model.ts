@@ -43,6 +43,7 @@ export const requestDecisionBody = t.Object({
 });
 
 export const recordDecisionBody = t.Object({
+  requestRevision: t.String({ format: 'uuid' }),
   outcome: t.Union([t.Literal('approved'), t.Literal('rejected'), t.Literal('done')]),
   note: t.Optional(t.String({ maxLength: 5000 })),
 });
@@ -50,6 +51,7 @@ export const recordDecisionBody = t.Object({
 export const decisionQueueQuery = t.Object({ ...pageQueryFields });
 
 export const DecisionRequestResponse = t.Object({
+  revision: t.String(),
   issueId: t.Number(),
   userId: t.String(),
   userName: t.Nullable(t.String()),

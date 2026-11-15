@@ -20,7 +20,12 @@ export default function DecisionQueueRow({ item }: { item: DecisionQueueItem }) 
   const record = useRecordDecision();
 
   const decide = async (outcome: DecisionOutcome) => {
-    await record.mutateAsync({ issueId: item.issueId, outcome, note: note.trim() || undefined });
+    await record.mutateAsync({
+      issueId: item.issueId,
+      requestRevision: item.revision,
+      outcome,
+      note: note.trim() || undefined,
+    });
     toast.success(t(`recorded.${outcome}`));
   };
 

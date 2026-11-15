@@ -41,8 +41,13 @@ function useDecisionMutation<TVars extends { issueId: number }>(
 }
 
 export function useRecordDecision() {
-  return useDecisionMutation((vars: { issueId: number; outcome: DecisionOutcome; note?: string }) =>
-    recordDecision(vars.issueId, { outcome: vars.outcome, note: vars.note }),
+  return useDecisionMutation(
+    (vars: { issueId: number; requestRevision: string; outcome: DecisionOutcome; note?: string }) =>
+      recordDecision(vars.issueId, {
+        requestRevision: vars.requestRevision,
+        outcome: vars.outcome,
+        note: vars.note,
+      }),
   );
 }
 

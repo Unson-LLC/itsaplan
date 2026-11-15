@@ -43,8 +43,58 @@ async function personalKey(userId: string): Promise<string> {
   return (await auth.api.createApiKey({ body: { userId, name: 'bot' } })).key;
 }
 
+async function revision(client: Api, issueId: number) {
+  const read = await client.issues({ issueId }).decisions.get();
+  return read.data?.request?.revision ?? crypto.randomUUID();
+}
+
 describe('decisions', () => {
   beforeEach(resetDb);
+
+  it('rejects an answer to a replaced request without changing the new request', async () => {
+    const { owner, decider, issueId } = await setup();
+    const first = await askApproval(owner.api, issueId, decider.userId);
+    const second = await owner.api.issues({ issueId })['decision-request'].put({
+      userId: decider.userId,
+      kind: 'approval',
+      summary: 'Deploy v3?',
+      target: { head: 'v3' },
+    });
+    expect(second.data!.revision).not.toBe(first.data!.revision);
+    const stale = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: first.data!.revision,
+      outcome: 'approved',
+    });
+    expect(stale.status).toBe(409);
+    const read = await decider.api.issues({ issueId }).decisions.get();
+    expect(read.data!.decisions).toEqual([]);
+    expect(read.data!.request).toMatchObject({
+      revision: second.data!.revision,
+      summary: 'Deploy v3?',
+    });
+    const fresh = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: second.data!.revision,
+      outcome: 'approved',
+    });
+    expect(fresh.status).toBe(201);
+    expect(fresh.data).toMatchObject({ summary: 'Deploy v3?', target: { head: 'v3' } });
+  });
+
+  it('rejects an answer after withdrawal and identical recreation', async () => {
+    const { owner, decider, issueId } = await setup();
+    const first = await askApproval(owner.api, issueId, decider.userId);
+    await owner.api.issues({ issueId })['decision-request'].delete();
+    const second = await askApproval(owner.api, issueId, decider.userId);
+    expect(second.data!.revision).not.toBe(first.data!.revision);
+    const stale = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: first.data!.revision,
+      outcome: 'approved',
+    });
+    expect(stale.status).toBe(409);
+    const read = await decider.api.issues({ issueId }).decisions.get();
+    expect(read.data!.decisions).toEqual([]);
+    expect(read.data!.request!.revision).toBe(second.data!.revision);
+  });
 
   it('records the decider’s approval from the web app and closes the request', async () => {
     const { owner, decider, issueId } = await setup();
@@ -58,9 +108,11 @@ describe('decisions', () => {
       items: [{ issueId, identifier: 'MKT-1', summary: 'Deploy v2 to production?' }],
     });
 
-    const res = await decider.api
-      .issues({ issueId })
-      .decisions.post({ outcome: 'approved', note: 'Go ahead after 18:00' });
+    const res = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'approved',
+      note: 'Go ahead after 18:00',
+    });
     expect(res.status).toBe(201);
     expect(res.data).toMatchObject({
       actorUserId: decider.userId,
@@ -93,7 +145,10 @@ describe('decisions', () => {
     expect(comment.status).toBe(201);
     expect(comment.data!.actorUserId).toBe(decider.userId);
 
-    const res = await bot.issues({ issueId }).decisions.post({ outcome: 'approved' });
+    const res = await bot.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'approved',
+    });
     expect(res.status).toBe(403);
     expect(res.error!.value).toMatchObject({ code: 'DECISION_NEEDS_SIGNED_IN_PERSON' });
 
@@ -108,12 +163,22 @@ describe('decisions', () => {
     const key = await personalKey(decider.userId);
 
     const withKey = authedApi(decider.cookie, { 'x-api-key': key });
-    expect((await withKey.issues({ issueId }).decisions.post({ outcome: 'approved' })).status).toBe(
-      403,
-    );
+    expect(
+      (
+        await withKey.issues({ issueId }).decisions.post({
+          requestRevision: await revision(decider.api, issueId),
+          outcome: 'approved',
+        })
+      ).status,
+    ).toBe(403);
     const withBearer = authedApi(decider.cookie, { authorization: `Bearer ${key}` });
     expect(
-      (await withBearer.issues({ issueId }).decisions.post({ outcome: 'approved' })).status,
+      (
+        await withBearer.issues({ issueId }).decisions.post({
+          requestRevision: await revision(decider.api, issueId),
+          outcome: 'approved',
+        })
+      ).status,
     ).toBe(403);
   });
 
@@ -151,7 +216,10 @@ describe('decisions', () => {
     const { owner, decider, issueId } = await setup();
     const bot = apiKeyApi(await personalKey(owner.userId));
     expect((await askApproval(bot, issueId, decider.userId)).status).toBe(200);
-    await decider.api.issues({ issueId }).decisions.post({ outcome: 'rejected' });
+    await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'rejected',
+    });
 
     const read = await bot.issues({ issueId }).decisions.get();
     expect(read.data!.decisions[0]).toMatchObject({ outcome: 'rejected', via: 'session' });
@@ -165,9 +233,14 @@ describe('decisions', () => {
       summary: 'Rotate the Stripe key',
     });
 
-    const wrong = await decider.api.issues({ issueId }).decisions.post({ outcome: 'approved' });
+    const wrong = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'approved',
+    });
     expect(wrong.status).toBe(400);
-    const done = await decider.api.issues({ issueId }).decisions.post({ outcome: 'done' });
+    const done = await decider.api
+      .issues({ issueId })
+      .decisions.post({ requestRevision: await revision(decider.api, issueId), outcome: 'done' });
     expect(done.status).toBe(201);
     expect(done.data).toMatchObject({ kind: 'owner_task', outcome: 'done', note: '' });
   });
@@ -176,13 +249,19 @@ describe('decisions', () => {
     const { owner, decider, issueId } = await setup();
     await askApproval(owner.api, issueId, decider.userId);
 
-    const res = await owner.api.issues({ issueId }).decisions.post({ outcome: 'approved' });
+    const res = await owner.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'approved',
+    });
     expect(res.status).toBe(403);
   });
 
   it('answers 409 when the issue has no open request', async () => {
     const { decider, issueId } = await setup();
-    const res = await decider.api.issues({ issueId }).decisions.post({ outcome: 'approved' });
+    const res = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'approved',
+    });
     expect(res.status).toBe(409);
   });
 
@@ -238,7 +317,10 @@ describe('decisions', () => {
       summary: 'Deploy?',
       target,
     });
-    const decided = await decider.api.issues({ issueId }).decisions.post({ outcome: 'approved' });
+    const decided = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'approved',
+    });
     expect(decided.data).toMatchObject({ target, revokedAt: null });
     const decisionId = decided.data!.id;
 
@@ -262,7 +344,10 @@ describe('decisions', () => {
   it('revokes only an approval', async () => {
     const { owner, decider, issueId } = await setup();
     await askApproval(owner.api, issueId, decider.userId);
-    const rejected = await decider.api.issues({ issueId }).decisions.post({ outcome: 'rejected' });
+    const rejected = await decider.api.issues({ issueId }).decisions.post({
+      requestRevision: await revision(decider.api, issueId),
+      outcome: 'rejected',
+    });
     const res = await decider.api
       .issues({ issueId })
       .decisions({ decisionId: rejected.data!.id })

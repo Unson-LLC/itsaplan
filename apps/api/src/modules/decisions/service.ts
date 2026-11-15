@@ -7,6 +7,7 @@ import { isEligibleIssueWatcher } from '#modules/issues/watchers';
 import { OUTCOMES_BY_KIND, type DecisionKind, type DecisionOutcome } from './model';
 
 export interface DecisionRequestDto {
+  revision: string;
   issueId: number;
   userId: string;
   userName: string | null;
@@ -44,6 +45,7 @@ export interface DecisionQueueItemDto extends DecisionRequestDto {
 const decider = alias(user, 'decider');
 
 const requestColumns = {
+  revision: issueDecisionRequest.revision,
   issueId: issueDecisionRequest.issueId,
   userId: issueDecisionRequest.userId,
   userName: decider.name,
@@ -61,6 +63,7 @@ type RequestRow = {
 
 function toRequest(row: RequestRow): DecisionRequestDto {
   return {
+    revision: row.revision!,
     issueId: row.issueId!,
     userId: row.userId!,
     userName: row.userName,
@@ -133,6 +136,7 @@ export async function requestDecision(input: {
     .from(user)
     .where(eq(user.id, input.actorUserId));
   const values = {
+    revision: crypto.randomUUID(),
     userId: input.userId,
     kind: input.kind,
     summary: input.summary.trim(),
@@ -185,6 +189,7 @@ export async function cancelDecisionRequest(
 // Records the caller's answer to the open request addressed to them and closes it. The
 // route admits only a signed-in browser session; this function trusts that.
 export async function recordDecision(input: {
+  requestRevision: string;
   issueId: number;
   actorUserId: string;
   outcome: DecisionOutcome;
@@ -197,6 +202,8 @@ export async function recordDecision(input: {
       .where(eq(issueDecisionRequest.issueId, input.issueId))
       .for('update');
     if (!request) throw new HttpError(409, 'This issue has no open decision request');
+    if (request.revision !== input.requestRevision)
+      throw new HttpError(409, 'This decision request has changed; reload before answering');
     if (request.userId !== input.actorUserId)
       throw new HttpError(403, 'This decision request is addressed to another member');
     const kind = request.kind as DecisionKind;
