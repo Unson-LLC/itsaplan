@@ -17,7 +17,7 @@ it('rejects user assignments after queue opt-in and preserves existing issues', 
   const field = await client.projects({ projectKey: 'QUEUE' })['custom-fields'].post({
     name: 'Assignment queue',
     fieldType: 'select',
-    options: ['runnerのキュー', '承認待ち', '佐藤さん本人の作業'],
+    options: ['runnerのキュー', '承認待ち', '人の作業'],
   });
   expect(field.status).toBe(201);
   expect((await client.issues({ issueId: legacy.data!.id }).get()).data!.assigneeUserId).toBe(
