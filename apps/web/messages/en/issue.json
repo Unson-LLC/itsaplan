@@ -357,7 +357,14 @@
     "worklogRemoved": "removed the <v>{time}</v> logged on <v>{date}</v>",
     "commentEdited": "edited a comment",
     "commentDeleted": "deleted a comment",
-    "issueMoved": "moved this issue from <v>{from}</v> to <v>{to}</v>"
+    "issueMoved": "moved this issue from <v>{from}</v> to <v>{to}</v>",
+    "decisionRequestedApproval": "asked <v>{name}</v> for approval",
+    "decisionRequestedTask": "asked <v>{name}</v> to do a task only they can do",
+    "decisionRequestCancelled": "withdrew the decision request to <v>{name}</v>",
+    "decidedApproved": "<v>approved</v> the request",
+    "decidedRejected": "<v>rejected</v> the request",
+    "decidedDone": "marked the requested task <v>done</v>",
+    "decisionRevoked": "<v>revoked</v> their approval"
   },
   "development": {
     "title": "Development",

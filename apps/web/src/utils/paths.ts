@@ -56,6 +56,9 @@ export const runnerQueuePath = (ref: string) => aiTeamPath(ref, 'queue');
 
 export const inboxPath = (ref: string) => `${projectPath(ref)}/inbox`;
 
+// The caller's open decision requests, from every project they can read.
+export const decisionsPath = (ref: string) => `${projectPath(ref)}/decisions`;
+
 // The member's own notification preferences (which events, by which channel, their
 // Telegram chat id). A main-nav Configuration destination, open to any member.
 export const notificationsPath = (ref: string) => `${projectPath(ref)}/notifications`;

@@ -357,7 +357,14 @@
     "worklogRemoved": "menghapus catatan <v>{time}</v> pada <v>{date}</v>",
     "commentEdited": "mengedit komentar",
     "commentDeleted": "menghapus komentar",
-    "issueMoved": "memindahkan isu ini dari <v>{from}</v> ke <v>{to}</v>"
+    "issueMoved": "memindahkan isu ini dari <v>{from}</v> ke <v>{to}</v>",
+    "decisionRequestedApproval": "asked <v>{name}</v> for approval",
+    "decisionRequestedTask": "asked <v>{name}</v> to do a task only they can do",
+    "decisionRequestCancelled": "withdrew the decision request to <v>{name}</v>",
+    "decidedApproved": "<v>approved</v> the request",
+    "decidedRejected": "<v>rejected</v> the request",
+    "decidedDone": "marked the requested task <v>done</v>",
+    "decisionRevoked": "<v>revoked</v> their approval"
   },
   "development": {
     "title": "Pengembangan",

@@ -159,6 +159,10 @@ export const app = new Elysia()
           { name: 'Issue Templates', description: 'Presets a new issue can be created from' },
           { name: 'Issues', description: 'Issues, their fields, feed, and comments' },
           {
+            name: 'Decisions',
+            description: 'Decisions a member is asked to make on an issue, and what they decided',
+          },
+          {
             name: 'Initiatives',
             description: 'Initiatives (issue groupings) and their activity feed',
           },

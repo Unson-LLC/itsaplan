@@ -18,6 +18,7 @@ import { customFieldRoutes } from './modules/custom-fields';
 import { issueTemplateRoutes } from './modules/issue-templates';
 import { projectTemplateRoutes } from './modules/project-templates';
 import { issueRoutes } from './modules/issues';
+import { decisionRoutes } from './modules/decisions';
 import { initiativeRoutes } from './modules/initiatives';
 import { cycleRoutes } from './modules/cycles';
 import { attachmentRoutes } from './modules/attachments';
@@ -89,6 +90,7 @@ export const planner = new Elysia({ name: 'planner' })
   .use(customFieldRoutes)
   .use(issueTemplateRoutes)
   .use(issueRoutes)
+  .use(decisionRoutes)
   .use(initiativeRoutes)
   .use(cycleRoutes)
   .use(attachmentRoutes)

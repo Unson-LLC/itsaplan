@@ -16,6 +16,7 @@ import IssueLinksPanel from './IssueLinksPanel';
 import IssueDevelopmentPanel from './IssueDevelopmentPanel';
 import IssueDocumentsPanel from './IssueDocumentsPanel';
 import IssueWorklogPanel from './IssueWorklogPanel';
+import IssueDecisionsPanel from './IssueDecisionsPanel';
 import IssueSubtasksPanel from './IssueSubtasksPanel';
 import IssueActivityFeed from './IssueActivityFeed';
 import LastCommentBubble from './LastCommentBubble';
@@ -206,6 +207,8 @@ export default function IssueDetailContent({
       {features.checklists && <IssueChecklistsPanel issue={issue} />}
 
       {features.timeLogging && <IssueWorklogPanel project={project} issue={issue} />}
+
+      <IssueDecisionsPanel issueId={issue.id} />
 
       <IssueDevelopmentPanel
         issueId={issue.id}

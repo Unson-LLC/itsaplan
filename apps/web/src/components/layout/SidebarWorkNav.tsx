@@ -3,6 +3,7 @@ import { useShellRoute } from '@/hooks/useShellRoute';
 import { useTranslations } from 'next-intl';
 import {
   BookOpenText,
+  ClipboardCheck,
   Inbox,
   LayoutDashboard,
   RefreshCw,
@@ -13,6 +14,7 @@ import {
 import {
   cyclesPath,
   dashboardsPath,
+  decisionsPath,
   documentsPath,
   inboxPath,
   initiativesPath,
@@ -91,6 +93,13 @@ export default function SidebarWorkNav({
             active={pathname.endsWith('/inbox')}
             disabled={disabled}
             badge={inboxUnread}
+          />
+          <SidebarNavItem
+            href={projectKey ? decisionsPath(projectKey) : '#'}
+            icon={ClipboardCheck}
+            label={t('decisions')}
+            active={pathname.endsWith('/decisions')}
+            disabled={disabled}
           />
           {features.dashboards && can('dashboards', 'read') && (
             <SidebarNavItem

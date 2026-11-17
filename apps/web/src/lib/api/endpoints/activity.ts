@@ -80,7 +80,11 @@ export type ActivityAction =
   | 'agent_started'
   | 'agent_finished'
   | 'comment_edited'
-  | 'comment_deleted';
+  | 'comment_deleted'
+  | 'decision_requested'
+  | 'decision_request_cancelled'
+  | 'decided'
+  | 'decision_revoked';
 
 // One side of a change: the display-ready text snapshot (column/label/type/assignee
 // name, raw priority, ISO date, or the new text of a long field) and the id of the

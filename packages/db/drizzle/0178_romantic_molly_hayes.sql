@@ -1,0 +1,1 @@
+ALTER TABLE "issue_decision_request" ADD COLUMN "revision" uuid DEFAULT gen_random_uuid() NOT NULL;
