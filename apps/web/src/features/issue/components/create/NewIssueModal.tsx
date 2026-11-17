@@ -1,3 +1,4 @@
+import { assignmentQueueField } from '@/utils/assignmentQueue';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Editor } from '@tiptap/react';
 import { MoreHorizontal } from 'lucide-react';
@@ -94,6 +95,7 @@ export default function NewIssueModal({
       ? userId
       : null;
   });
+  const queueField = assignmentQueueField(project.customFields);
   const [delegateUserId, setDelegateUserId] = useState<string | null>(
     defaults.delegateUserId ?? null,
   );
@@ -116,9 +118,10 @@ export default function NewIssueModal({
   );
   // A member field the dialog was opened with (the board grouped by it) starts
   // filled in, and shows as a property row so it is visible before saving.
-  const [activeFieldIds, setActiveFieldIds] = useState<number[]>(() =>
-    (defaults.fieldValues ?? []).map((f) => f.fieldId),
-  );
+  const [activeFieldIds, setActiveFieldIds] = useState<number[]>(() => [
+    ...(defaults.fieldValues ?? []).map((f) => f.fieldId),
+    ...(queueField ? [queueField.id] : []),
+  ]);
   const [fieldValues, setFieldValues] = useState<Record<number, IssueFieldValueInput>>(() =>
     Object.fromEntries((defaults.fieldValues ?? []).map((f) => [f.fieldId, { value: f.userId }])),
   );
@@ -251,7 +254,7 @@ export default function NewIssueModal({
           typeId,
           initiativeId,
           cycleId: cycle?.id ?? null,
-          assigneeUserId,
+          assigneeUserId: queueField ? null : assigneeUserId,
           delegateUserId,
           priority: priority || null,
           estimatePoints,
@@ -390,7 +393,7 @@ export default function NewIssueModal({
         >
           <StatusSelect columns={project.columns} value={columnId} onChange={setColumnId} />
 
-          {project.assignees.some((a) => a.kind === 'member') && (
+          {!queueField && project.assignees.some((a) => a.kind === 'member') && (
             <AssigneeSelect
               assignees={project.assignees}
               value={assigneeUserId}

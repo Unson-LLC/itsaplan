@@ -1,3 +1,4 @@
+import { assignmentQueueField } from '@/utils/assignmentQueue';
 import { Fragment, type ReactNode } from 'react';
 import { RefreshCw, Target } from 'lucide-react';
 import type { CustomField } from '@/lib/api/endpoints/customFields';
@@ -79,6 +80,7 @@ export default function IssueProperties({
   groupsOpen: { isOpen: (key: string) => boolean; toggle: (key: string) => void };
 }) {
   const t = useTranslations('issue.fields');
+  const queueField = assignmentQueueField(project.customFields);
   const hasMembers = project.assignees.some((a) => a.kind === 'member');
   const hasAgents = project.assignees.some((a) => a.kind === 'agent');
   // The calendars grey out days that would put one date on the wrong side of the
@@ -125,7 +127,19 @@ export default function IssueProperties({
     {
       key: 'groupPeople',
       rows: [
-        hasMembers && (
+        queueField && (
+          <IssuePropertyRow key="assignmentQueue" label={t('assignee')}>
+            <IssueCustomFieldControl
+              def={queueField}
+              current={issue.fields.find((field) => field.fieldId === queueField.id)}
+              assignees={project.assignees}
+              saveKey={`${queueField.id}-${issue.updatedAt}`}
+              onChange={(value) => onSetField(queueField.id, value)}
+              readOnly={readOnly}
+            />
+          </IssuePropertyRow>
+        ),
+        !queueField && hasMembers && (
           <IssuePropertyRow key="assignee" label={t('assignee')}>
             <AssigneeSelect
               assignees={project.assignees}
@@ -280,7 +294,7 @@ export default function IssueProperties({
     {
       key: 'groupCustom',
       rows: fieldDefs
-        .filter((def) => !def.showInBody)
+        .filter((def) => !def.showInBody && def.id !== queueField?.id)
         .map((def) => {
           const current = issue.fields.find((f) => f.fieldId === def.id);
           const saveKey = `${def.id}-${issue.updatedAt}`;
