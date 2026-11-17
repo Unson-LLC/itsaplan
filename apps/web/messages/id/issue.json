@@ -357,7 +357,8 @@
     "worklogRemoved": "menghapus catatan <v>{time}</v> pada <v>{date}</v>",
     "commentEdited": "mengedit komentar",
     "commentDeleted": "menghapus komentar",
-    "issueMoved": "memindahkan isu ini dari <v>{from}</v> ke <v>{to}</v>"
+    "issueMoved": "memindahkan isu ini dari <v>{from}</v> ke <v>{to}</v>",
+    "agentRunCanceled": "membatalkan proses agen #{run}"
   },
   "development": {
     "title": "Pengembangan",
@@ -564,6 +565,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "Batalkan proses",
+    "cancelRunConfirm": "Batalkan proses dalam antrean ini? Proses ini tidak akan diambil oleh runner.",
+    "cancelReason": "Alasan (opsional)",
+    "runCanceled": "Proses dibatalkan"
   }
 }

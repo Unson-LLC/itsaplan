@@ -357,7 +357,8 @@
     "worklogRemoved": "<v>{time}</v> ثبت‌شده در <v>{date}</v> را حذف کرد",
     "commentEdited": "یک دیدگاه را ویرایش کرد",
     "commentDeleted": "یک دیدگاه را حذف کرد",
-    "issueMoved": "این تسک را از <v>{from}</v> به <v>{to}</v> منتقل کرد"
+    "issueMoved": "این تسک را از <v>{from}</v> به <v>{to}</v> منتقل کرد",
+    "agentRunCanceled": "اجرای عامل شماره {run} را لغو کرد"
   },
   "development": {
     "title": "توسعه",
@@ -564,6 +565,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "لغو اجرا",
+    "cancelRunConfirm": "این اجرای در صف لغو شود؟ هیچ اجراکننده‌ای آن را دریافت نخواهد کرد.",
+    "cancelReason": "دلیل (اختیاری)",
+    "runCanceled": "اجرا لغو شد"
   }
 }

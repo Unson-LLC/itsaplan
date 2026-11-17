@@ -79,6 +79,7 @@ export type ActivityAction =
   | 'github_pr'
   | 'agent_started'
   | 'agent_finished'
+  | 'agent_run_canceled'
   | 'comment_edited'
   | 'comment_deleted';
 

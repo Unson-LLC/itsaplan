@@ -3,6 +3,7 @@ import { pageQuery, type Page, type PageParams } from '@/lib/api/core/paging';
 import type { IssueAgentRun, IssueAgentRunTrace } from './issues';
 
 export interface RunnerQueueRun extends IssueAgentRun {
+  canCancel: boolean;
   issueId: number | null;
   sequenceNumber: number | null;
   issueTitle: string | null;
@@ -42,4 +43,10 @@ export const getRunsInFlight = (api: string) =>
 export const getInternalRunTrace = (runId: number, traceId?: string) =>
   request<IssueAgentRunTrace | null>(
     `/agent-runs/${runId}/internal-trace${traceId == null ? '' : `?traceId=${encodeURIComponent(traceId)}`}`,
+  );
+
+export const cancelAgentRun = (projectRef: string, runId: number, reason?: string) =>
+  request<{ id: number; status: 'canceled' }>(
+    `/projects/${encodeURIComponent(projectRef)}/agent-runs/${runId}/cancel`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
   );

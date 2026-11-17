@@ -357,7 +357,8 @@
     "worklogRemoved": "删除了 <v>{date}</v> 的 <v>{time}</v>",
     "commentEdited": "编辑了一条评论",
     "commentDeleted": "删除了一条评论",
-    "issueMoved": "将此事项从 <v>{from}</v> 移动到 <v>{to}</v>"
+    "issueMoved": "将此事项从 <v>{from}</v> 移动到 <v>{to}</v>",
+    "agentRunCanceled": "取消了智能体运行 #{run}"
   },
   "development": {
     "title": "开发",
@@ -564,6 +565,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "取消运行",
+    "cancelRunConfirm": "要取消此排队中的运行吗？运行器将不会领取它。",
+    "cancelReason": "原因（可选）",
+    "runCanceled": "运行已取消"
   }
 }

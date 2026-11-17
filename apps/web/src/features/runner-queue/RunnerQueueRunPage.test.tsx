@@ -12,7 +12,7 @@ import issue from '../../../messages/en/issue.json';
 import common from '../../../messages/en/common.json';
 import teams from '../../../messages/en/teams.json';
 
-it('shows the run its URL names and hides it after access denial', async () => {
+it('shows the selected run, confirms cancellation and hides it after access denial', async () => {
   const names = [
     'window',
     'document',
@@ -45,6 +45,7 @@ it('shows the run its URL names and hides it after access denial', async () => {
     pretendToBeVisual: true,
   });
   const run: RunnerQueueRun = {
+    canCancel: false,
     id: 1,
     agentId: 1,
     username: 'runner',
@@ -128,6 +129,70 @@ it('shows the run its URL names and hides it after access denial', async () => {
       ),
     );
     assert.ok(document.body.textContent?.includes('Selected result'));
+    assert.ok(
+      !Array.from(document.querySelectorAll('button')).some(
+        (button) => button.textContent === 'Cancel run',
+      ),
+    );
+    const queued = {
+      ...run,
+      canCancel: true,
+      status: 'pending',
+      executionState: 'queued',
+      output: null,
+    };
+    await act(async () => {
+      client.setQueryData(detailKey, { ...page, items: [queued], queued: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    const cancelButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Cancel run',
+    )!;
+    assert.ok(cancelButton);
+    await act(async () => cancelButton.click());
+    assert.ok(document.body.textContent?.includes('Cancel this queued run?'));
+    const textarea = document.querySelector('textarea')!;
+    assert.ok(textarea);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        textarea,
+        'No longer needed',
+      );
+      textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    const requests: { url: string; body: string | null }[] = [];
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          requests.push({ url: String(url), body: String(init.body) });
+          return Response.json({ id: 1, status: 'canceled' });
+        }
+        if (!String(url).includes('/agent-runs/queue')) return Response.json(null);
+        return Response.json({
+          ...page,
+          items: [{ ...queued, canCancel: false, status: 'canceled', executionState: 'canceled' }],
+        });
+      },
+    });
+    const confirmButton = Array.from(document.querySelectorAll('[role="dialog"] button')).find(
+      (button) => button.textContent === 'Cancel run',
+    );
+    assert.ok(confirmButton instanceof dom.window.HTMLButtonElement);
+    await act(async () => {
+      confirmButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    assert.equal(requests.length, 1);
+    assert.ok(requests[0].url.endsWith('/projects/team.RUN/agent-runs/1/cancel'));
+    assert.deepEqual(JSON.parse(requests[0].body!), { reason: 'No longer needed' });
+    assert.ok(!document.querySelector('[role="dialog"]'));
+    assert.ok(
+      !Array.from(document.querySelectorAll('button')).some(
+        (button) => button.textContent === 'Cancel run',
+      ),
+    );
+
     await act(async () => {
       client
         .getQueryCache()

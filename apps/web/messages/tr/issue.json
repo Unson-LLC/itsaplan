@@ -357,7 +357,8 @@
     "worklogRemoved": "<v>{date}</v> tarihinde kaydedilen <v>{time}</v> süresini sildi",
     "commentEdited": "bir yorumu düzenledi",
     "commentDeleted": "bir yorumu sildi",
-    "issueMoved": "bu işi <v>{from}</v> projesinden <v>{to}</v> projesine taşıdı"
+    "issueMoved": "bu işi <v>{from}</v> projesinden <v>{to}</v> projesine taşıdı",
+    "agentRunCanceled": "#{run} numaralı ajan çalıştırmasını iptal etti"
   },
   "development": {
     "title": "Geliştirme",
@@ -564,6 +565,10 @@
     "traceTruncated": "The recording limit was reached. Later events are omitted; the final run result is still available.",
     "selectRun": "Select a run to see its details",
     "runNotFound": "This run is not in your queue, or you cannot read it.",
-    "backToRuns": "Back to runs"
+    "backToRuns": "Back to runs",
+    "cancelRun": "Çalıştırmayı iptal et",
+    "cancelRunConfirm": "Kuyruktaki bu çalıştırma iptal edilsin mi? Hiçbir çalıştırıcı bu işi almayacak.",
+    "cancelReason": "Neden (isteğe bağlı)",
+    "runCanceled": "Çalıştırma iptal edildi"
   }
 }

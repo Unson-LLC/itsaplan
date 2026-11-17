@@ -61,6 +61,7 @@ export const ACTION_ICON: Record<ActivityAction, LucideIcon> = {
   github_pr: GitPullRequest,
   agent_started: Bot,
   agent_finished: Bot,
+  agent_run_canceled: Bot,
   comment_edited: MessageSquare,
   comment_deleted: MessageSquare,
 };
