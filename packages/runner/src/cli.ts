@@ -60,7 +60,11 @@ async function drain<T>(
       log(`claim failed: ${String(err)}`);
       // Backing off here and not in onEmpty: a claim that waits on the server returns
       // instantly when it fails, and retrying it at that rate would hammer both sides.
-      await sleep(ERROR_BACKOFF_MS);
+      const delayMs =
+        err instanceof RequestError && err.status === 429
+          ? (err.retryAfterMs ?? ERROR_BACKOFF_MS)
+          : ERROR_BACKOFF_MS;
+      await sleep(delayMs);
       continue;
     }
     if (!item) {
