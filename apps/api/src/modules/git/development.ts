@@ -1,4 +1,4 @@
-import { db, issue, issueDevelopmentCheck, issueDevelopmentLink } from '@repo/db';
+import { db, issue, issueDevelopmentCheck, issueDevelopmentLink, type DbExecutor } from '@repo/db';
 import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { HttpError, iso } from '#shared/lib';
 import {
@@ -81,14 +81,17 @@ function aggregateChecks(checks: DevelopmentCheck[]): PipelineStatus | null {
   return 'success';
 }
 
-export async function listIssueDevelopmentLinks(issueId: number): Promise<DevelopmentLink[]> {
-  const links = await db
+export async function listIssueDevelopmentLinks(
+  issueId: number,
+  on: DbExecutor = db,
+): Promise<DevelopmentLink[]> {
+  const links = await on
     .select()
     .from(issueDevelopmentLink)
     .where(eq(issueDevelopmentLink.issueId, issueId))
     .orderBy(desc(issueDevelopmentLink.updatedAt), desc(issueDevelopmentLink.id));
   const rows = links.length
-    ? await db
+    ? await on
         .select()
         .from(issueDevelopmentCheck)
         .where(

@@ -26,6 +26,7 @@ import { recordActivity, textSide } from './activity';
 import { recordStatusChange } from './status-history';
 import { recordCycleChange } from './cycle-history';
 import { emitIssueEvent } from './webhook-payload';
+import { lockIssuesInTx, setTxTimeouts } from './tx';
 import { queueStatusRuns } from '#modules/agents/schedules/issue-runs';
 import { emitRunsCanceled } from '#modules/agents/core/run-finished';
 
@@ -118,13 +119,15 @@ export async function moveIssue(
   const fields = await mapFields(movedIds, target.id);
 
   const canceledRuns = await db.transaction(async (tx) => {
-    // Everything above was read without a lock. A concurrent move of the same issue, or
-    // a subtask added since, would otherwise write over that state.
+    await setTxTimeouts(tx);
+    // Everything above was read without a lock. Lock every moved issue in ascending id
+    // order (matching all multi-issue writes), then re-verify project and subtasks so a
+    // concurrent move or subtask change cannot be overwritten.
+    await lockIssuesInTx(tx, movedIds);
     const [locked] = await tx
       .select({ projectId: issue.projectId })
       .from(issue)
-      .where(eq(issue.id, issueId))
-      .for('update');
+      .where(eq(issue.id, issueId));
     const current = await tx
       .select({ id: issue.id })
       .from(issue)
@@ -210,11 +213,32 @@ export async function moveIssue(
       .where(
         and(inArray(issueWatcher.issueId, movedIds), notInArray(issueWatcher.userId, [...members])),
       );
-    return tx
+    const canceled = await tx
       .update(agentRun)
       .set({ status: 'canceled', executionStartedAt: null, finishedAt: sql`now()` })
       .where(and(inArray(agentRun.issueId, movedIds), eq(agentRun.status, 'pending')))
       .returning({ id: agentRun.id });
+
+    for (const [i, p] of plans.entries()) {
+      await recordStatusChange([p.id], p.newColumnId, undefined, tx);
+      await recordCycleChange(p.id, p.cycleId, null, tx);
+      await recordActivity(
+        p.id,
+        [
+          {
+            action: 'moved',
+            from: textSide(`${source.key}-${p.sequenceNumber}`),
+            to: textSide(`${target.key}-${Number(seqRow.first) + i}`),
+          },
+        ],
+        actorUserId,
+        tx,
+      );
+      if (p.id === issueId && p.parentId !== null)
+        await recordParentChange(p.id, p.parentId, null, actorUserId, tx);
+    }
+
+    return canceled;
   });
   await emitRunsCanceled(
     canceledRuns.map((run) => run.id),
@@ -222,22 +246,7 @@ export async function moveIssue(
   );
 
   for (const p of plans) {
-    await recordStatusChange([p.id], p.newColumnId);
-    await recordCycleChange(p.id, p.cycleId, null);
     const after = (await getIssue(p.id))!;
-    await recordActivity(
-      p.id,
-      [
-        {
-          action: 'moved',
-          from: textSide(`${source.key}-${p.sequenceNumber}`),
-          to: textSide(after.identifier),
-        },
-      ],
-      actorUserId,
-    );
-    if (p.id === issueId && p.parentId !== null)
-      await recordParentChange(p.id, p.parentId, null, actorUserId);
     await emitIssueEvent('issue.updated', after, actorUserId);
     await queueStatusRuns([p.id], p.newColumnId, actorUserId);
   }

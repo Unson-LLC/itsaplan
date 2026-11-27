@@ -8,6 +8,7 @@ import {
   user,
   aiAgent,
   userPreference,
+  type DbExecutor,
 } from '@repo/db';
 import { and, desc, eq, ilike, isNotNull, isNull, notExists, or, sql } from 'drizzle-orm';
 import { iso } from '#shared/lib';
@@ -95,8 +96,12 @@ export async function getMembershipSource(
 }
 
 // The current user's role in a project, or null when they are not a member.
-export async function getMembership(projectId: number, userId: string): Promise<MemberRole | null> {
-  const rows = await db
+export async function getMembership(
+  projectId: number,
+  userId: string,
+  on: DbExecutor = db,
+): Promise<MemberRole | null> {
+  const rows = await on
     .select({ role: projectMember.role })
     .from(projectMember)
     .where(and(eq(projectMember.projectId, projectId), eq(projectMember.userId, userId)));
@@ -173,8 +178,11 @@ export async function getTeamPermissions(teamId: number, userId: string): Promis
 // Every member's resolved access in the project, keyed by user id — getMemberContext
 // in bulk, for a caller that judges several people at once (agents included: their
 // bot user is a member like any other).
-export async function listMemberContexts(projectId: number): Promise<Map<string, MemberContext>> {
-  const rows = await db
+export async function listMemberContexts(
+  projectId: number,
+  on: DbExecutor = db,
+): Promise<Map<string, MemberContext>> {
+  const rows = await on
     .select({
       userId: projectMember.userId,
       role: projectMember.role,

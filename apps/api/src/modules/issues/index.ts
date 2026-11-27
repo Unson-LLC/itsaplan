@@ -44,10 +44,12 @@ import {
   bulkDeleteIssues,
   setIssueLabels,
   setIssueFieldValue,
+  setIssueFieldValues,
   getIssueFieldValues,
 } from './service';
 import {
   listFeed,
+  getLatestActivityId,
   countFeed,
   listFeedRange,
   listGroupedFeed,
@@ -59,6 +61,7 @@ import {
   textSide,
   type FeedCursor,
 } from './activity';
+import { withSnapshotReadTx } from './tx';
 import { listStatusTimeline } from './status-history';
 import { addIssueLink, attachBoardLinks, listIssueLinks, removeIssueLink } from './links';
 import {
@@ -133,6 +136,7 @@ import {
   createWorklogBody,
   updateWorklogBody,
   IssueWithFieldsResponse,
+  getIssueQuery,
   IssueSearchHitResponse,
   CrossProjectIssueHitResponse,
   FeedItemResponse,
@@ -156,6 +160,8 @@ import {
   updateIssueBody,
   subtaskDispositionQuery,
   setIssueFieldValueBody,
+  setIssueFieldValuesBody,
+  SetIssueFieldValuesResponse,
   issueFieldParams,
   addIssueLinkBody,
   issueLinkParams,
@@ -550,22 +556,26 @@ export const issueRoutes = new Elysia({ name: 'issues', detail: { tags: ['Issues
   .get(
     '/projects/:projectKey/issues/:sequenceNumber',
     async ({ project, params, user, request }) => {
-      const issue = await getIssueBySequence(project.id, params.sequenceNumber);
-      if (!issue) throw new HttpError(404, 'Issue not found');
+      const snapshot = await withSnapshotReadTx(async (tx) => {
+        const issue = await getIssueBySequence(project.id, params.sequenceNumber, tx);
+        if (!issue) return null;
+        const fields = await getIssueFieldValues(issue.id, tx);
+        const links = await listIssueLinks(issue.id, tx);
+        const watchers = await listIssueWatchers(issue.projectId, issue.id, tx);
+        const parent = await getParentRef(issue.parentId, tx);
+        const subtasks = await listSubtasks(issue.id, tx);
+        const checklists = await listChecklists(issue.id, tx);
+        const development = await listIssueDevelopmentLinks(issue.id, tx);
+        return { ...issue, fields, links, watchers, parent, subtasks, checklists, development };
+      });
+      if (!snapshot) throw new HttpError(404, 'Issue not found');
       // An old number of a moved issue resolves to it in the project it is in now,
       // which the caller must be able to read as well.
-      if (issue.projectId !== project.id) {
-        await assertPermission(issue.projectId, user, 'work_items', 'read');
-        await assertMcpAllowed(issue.projectId, request.headers);
+      if (snapshot.projectId !== project.id) {
+        await assertPermission(snapshot.projectId, user, 'work_items', 'read');
+        await assertMcpAllowed(snapshot.projectId, request.headers);
       }
-      const fields = await getIssueFieldValues(issue.id);
-      const links = await listIssueLinks(issue.id);
-      const watchers = await listIssueWatchers(issue.projectId, issue.id);
-      const parent = await getParentRef(issue.parentId);
-      const subtasks = await listSubtasks(issue.id);
-      const checklists = await listChecklists(issue.id);
-      const development = await listIssueDevelopmentLinks(issue.id);
-      return { ...issue, fields, links, watchers, parent, subtasks, checklists, development };
+      return snapshot;
     },
     {
       params: issueSequenceParams,
@@ -674,33 +684,82 @@ export const issueRoutes = new Elysia({ name: 'issues', detail: { tags: ['Issues
     },
   )
 
-  // Reads the full issue including its custom field values. The handler fetches the
-  // issue for the response, so it asserts access on that row instead of using the
-  // workItem guard, which would resolve the project id a second time.
+  // Reads the full issue including its custom field values (and optionally its
+  // activity feed) inside a single REPEATABLE READ READ ONLY snapshot transaction.
+  // Access is checked before entering the snapshot; if a concurrent move changed
+  // the issue's project in between, access on the snapshot's project is re-checked
+  // before returning.
   .get(
     '/issues/:issueId',
-    async ({ params, user, request }) => {
-      const issue = await getIssue(params.issueId);
-      if (!issue) throw new HttpError(404, 'Issue not found');
-      await assertPermission(issue.projectId, user, 'work_items', 'read');
+    async ({ params, query, user, request }) => {
+      const initialProjectId = await getIssueProjectId(params.issueId);
+      if (initialProjectId == null) throw new HttpError(404, 'Issue not found');
+      await assertPermission(initialProjectId, user, 'work_items', 'read');
       // This route resolves the project itself, so it also enforces the per-project
       // MCP toggle itself (it does not run through the workItem guard).
-      await assertMcpAllowed(issue.projectId, request.headers);
-      const fields = await getIssueFieldValues(issue.id);
-      const links = await listIssueLinks(issue.id);
-      const watchers = await listIssueWatchers(issue.projectId, issue.id);
-      const parent = await getParentRef(issue.parentId);
-      const subtasks = await listSubtasks(issue.id);
-      const checklists = await listChecklists(issue.id);
-      const development = await listIssueDevelopmentLinks(issue.id);
-      return { ...issue, fields, links, watchers, parent, subtasks, checklists, development };
+      await assertMcpAllowed(initialProjectId, request.headers);
+
+      const includeActivity = query.includeActivity === 'true';
+      const activityLimit = Math.min(Math.max(query.activityLimit ?? 100, 1), 200);
+
+      const snapshot = await withSnapshotReadTx(async (tx) => {
+        const issue = await getIssue(params.issueId, tx);
+        if (!issue) return null;
+        const fields = await getIssueFieldValues(issue.id, tx);
+        const links = await listIssueLinks(issue.id, tx);
+        const watchers = await listIssueWatchers(issue.projectId, issue.id, tx);
+        const parent = await getParentRef(issue.parentId, tx);
+        const subtasks = await listSubtasks(issue.id, tx);
+        const checklists = await listChecklists(issue.id, tx);
+        const development = await listIssueDevelopmentLinks(issue.id, tx);
+        if (!includeActivity) {
+          return { ...issue, fields, links, watchers, parent, subtasks, checklists, development };
+        }
+        const feed = await listFeed(
+          issue.id,
+          {
+            limit: activityLimit,
+            maxLimit: 200,
+            filter: query.activityFilter,
+            order: query.activityOrder,
+          },
+          tx,
+        );
+        const latestActivityId = await getLatestActivityId(issue.id, tx);
+        return {
+          ...issue,
+          fields,
+          links,
+          watchers,
+          parent,
+          subtasks,
+          checklists,
+          development,
+          activity: {
+            items: feed.items,
+            nextCursor: feed.nextCursor,
+            truncated: feed.nextCursor !== null,
+            latestActivityId,
+          },
+        };
+      });
+
+      if (!snapshot) throw new HttpError(404, 'Issue not found');
+      if (snapshot.projectId !== initialProjectId) {
+        await assertPermission(snapshot.projectId, user, 'work_items', 'read');
+        await assertMcpAllowed(snapshot.projectId, request.headers);
+      }
+      return snapshot;
     },
     {
       params: issueParams,
+      query: getIssueQuery,
       response: { 200: IssueWithFieldsResponse, ...commonErrors },
       detail: {
         summary: 'Get an issue',
-        description: 'Get an issue by its numeric id.',
+        description:
+          'Get an issue by its numeric id from one consistent snapshot. Pass ' +
+          "includeActivity='true' to include its activity feed from the same snapshot.",
         ...requiresPermission(['work_items', 'read']),
         ...mcpTool('get_issue'),
       },
@@ -999,6 +1058,28 @@ export const issueRoutes = new Elysia({ name: 'issues', detail: { tags: ['Issues
         description:
           'Restore an archived issue by its numeric id. Its archived subtasks are restored with it.',
         ...mcpTool('restore_issue'),
+      },
+    },
+  )
+
+  // Atomically sets multiple custom fields and an optional comment on one issue
+  // in a single FOR UPDATE transaction. Any validation error rolls back all writes.
+  .put(
+    '/issues/:issueId/fields',
+    async ({ params, body, user, projectId }) =>
+      setIssueFieldValues(projectId, params.issueId, body, requireUser(user).id),
+    {
+      body: setIssueFieldValuesBody,
+      params: issueParams,
+      workItem: 'edit',
+      response: { 200: SetIssueFieldValuesResponse, ...commonErrors },
+      detail: {
+        summary: 'Set multiple custom field values atomically',
+        description:
+          'Set multiple custom field values and an optional comment on an issue in one ' +
+          'atomic transaction. Fails and rolls back all changes if any field or the comment ' +
+          'is invalid.',
+        ...mcpTool('set_issue_field_values'),
       },
     },
   )

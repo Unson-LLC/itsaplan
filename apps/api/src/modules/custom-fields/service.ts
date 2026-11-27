@@ -6,10 +6,12 @@ import {
   customFieldOption,
   issueFieldOption,
   issueFieldValue,
+  type DbExecutor,
 } from '@repo/db';
 import { and, asc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { HttpError } from '#shared/lib';
 import { getIssueTypeById } from '#modules/issue-types/service';
+import { lockIssuesInTx, setTxTimeouts } from '#modules/issues/tx';
 
 // Data access for custom fields and their options. Every field belongs to a
 // project. A field with issue_type_id NULL is project-wide (applies to every
@@ -69,10 +71,13 @@ function mapField(
 
 // Loads the options for the given field ids, grouped by field, each list ordered
 // by position. Returns an empty map for no ids.
-async function optionsByField(fieldIds: number[]): Promise<Map<number, CustomFieldOptionRow[]>> {
+async function optionsByField(
+  fieldIds: number[],
+  on: DbExecutor = db,
+): Promise<Map<number, CustomFieldOptionRow[]>> {
   const byField = new Map<number, CustomFieldOptionRow[]>();
   if (fieldIds.length === 0) return byField;
-  const rows = await db
+  const rows = await on
     .select()
     .from(customFieldOption)
     .where(inArray(customFieldOption.fieldId, fieldIds))
@@ -134,13 +139,14 @@ export async function listAgentMemberFieldIds(projectIds: number[]): Promise<num
 export async function getCustomFieldById(
   projectId: number,
   id: number,
+  on: DbExecutor = db,
 ): Promise<CustomFieldRow | null> {
-  const rows = await db
+  const rows = await on
     .select()
     .from(customField)
     .where(and(eq(customField.id, id), eq(customField.projectId, projectId)));
   if (!rows[0]) return null;
-  const options = await optionsByField([id]);
+  const options = await optionsByField([id], on);
   return mapField(rows[0], options.get(id) ?? []);
 }
 
@@ -258,6 +264,27 @@ async function syncOptions(
   }
 }
 
+// Locks every issue that holds a scalar value or option selection for `fieldId`
+// in ascending issue id order before touching issue_field_value / issue_field_option,
+// preventing deadlocks with single-issue writes that lock their issue row first.
+async function lockIssuesForCustomField(tx: Transaction, fieldId: number): Promise<void> {
+  const [valueIssues, optionIssues] = await Promise.all([
+    tx
+      .selectDistinct({ issueId: issueFieldValue.issueId })
+      .from(issueFieldValue)
+      .where(eq(issueFieldValue.fieldId, fieldId)),
+    tx
+      .selectDistinct({ issueId: issueFieldOption.issueId })
+      .from(issueFieldOption)
+      .where(eq(issueFieldOption.fieldId, fieldId)),
+  ]);
+  const issueIds = [
+    ...valueIssues.map((row) => row.issueId),
+    ...optionIssues.map((row) => row.issueId),
+  ];
+  await lockIssuesInTx(tx, issueIds);
+}
+
 // Updates a field, scoped to its project. Returns null when no field of that id
 // exists in the project. A field can be reshaped after creation, and the values
 // issues already hold follow the reshape: changing the type clears them, narrowing
@@ -287,6 +314,9 @@ export async function updateCustomField(
   }
 
   await db.transaction(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockIssuesForCustomField(tx, id);
+
     await tx
       .update(customField)
       .set({
@@ -322,9 +352,13 @@ export async function updateCustomField(
 
 // Deletes a field, scoped to its project. Returns true when a row was removed.
 export async function deleteCustomField(projectId: number, id: number): Promise<boolean> {
-  const deleted = await db
-    .delete(customField)
-    .where(and(eq(customField.id, id), eq(customField.projectId, projectId)))
-    .returning({ id: customField.id });
-  return deleted.length > 0;
+  return db.transaction(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockIssuesForCustomField(tx, id);
+    const deleted = await tx
+      .delete(customField)
+      .where(and(eq(customField.id, id), eq(customField.projectId, projectId)))
+      .returning({ id: customField.id });
+    return deleted.length > 0;
+  });
 }

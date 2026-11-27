@@ -1,4 +1,12 @@
-import { aiAgent, db, issueWatcher, projectMember, user, userPreference } from '@repo/db';
+import {
+  aiAgent,
+  db,
+  issueWatcher,
+  projectMember,
+  user,
+  userPreference,
+  type DbExecutor,
+} from '@repo/db';
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { getMemberContext, listMemberContexts, type MemberContext } from '#modules/members/service';
 import { hasPermission } from '#shared/permissions';
@@ -30,8 +38,9 @@ function canReadWorkItems(context: MemberContext | null | undefined): boolean {
 export async function listIssueWatchers(
   projectId: number,
   issueId: number,
+  on: DbExecutor = db,
 ): Promise<IssueWatcherRow[]> {
-  const rows = await db
+  const rows = await on
     .select({ userId: issueWatcher.userId, name: user.name, image: user.image })
     .from(issueWatcher)
     .innerJoin(user, eq(user.id, issueWatcher.userId))
@@ -44,7 +53,7 @@ export async function listIssueWatchers(
       and(eq(issueWatcher.issueId, issueId), eq(issueWatcher.subscribed, true), isNull(aiAgent.id)),
     )
     .orderBy(asc(user.name));
-  const contexts = await listMemberContexts(projectId);
+  const contexts = await listMemberContexts(projectId, on);
   return rows.filter((row) => canReadWorkItems(contexts.get(row.userId)));
 }
 

@@ -1,4 +1,4 @@
-import { db, issue, project as projectTable } from '@repo/db';
+import { db, issue, project as projectTable, type DbExecutor } from '@repo/db';
 import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { HttpError } from '#shared/lib';
@@ -21,8 +21,8 @@ export interface IssueRef {
   archived: boolean;
 }
 
-async function refsWhere(condition: SQL): Promise<IssueRef[]> {
-  const rows = await db
+async function refsWhere(condition: SQL, on: DbExecutor = db): Promise<IssueRef[]> {
+  const rows = await on
     .select({
       id: issue.id,
       sequenceNumber: issue.sequenceNumber,
@@ -49,14 +49,17 @@ async function refsWhere(condition: SQL): Promise<IssueRef[]> {
 
 // The issue's subtasks, by issue number. Archived ones are included: they stay
 // attached to their parent and are restored as its subtasks.
-export async function listSubtasks(issueId: number): Promise<IssueRef[]> {
-  return refsWhere(eq(issue.parentId, issueId));
+export async function listSubtasks(issueId: number, on: DbExecutor = db): Promise<IssueRef[]> {
+  return refsWhere(eq(issue.parentId, issueId), on);
 }
 
 // The issue an issue is a subtask of, or null when it has none.
-export async function getParentRef(parentId: number | null): Promise<IssueRef | null> {
+export async function getParentRef(
+  parentId: number | null,
+  on: DbExecutor = db,
+): Promise<IssueRef | null> {
   if (parentId === null) return null;
-  return (await refsWhere(eq(issue.id, parentId)))[0] ?? null;
+  return (await refsWhere(eq(issue.id, parentId), on))[0] ?? null;
 }
 
 // Puts each of the board's issues together with how many subtasks it has, archived

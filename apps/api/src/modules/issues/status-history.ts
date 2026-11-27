@@ -1,4 +1,4 @@
-import { db, issueStatus, projectColumn } from '@repo/db';
+import { db, issueStatus, projectColumn, type DbExecutor } from '@repo/db';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { iso } from '#shared/lib';
 
@@ -11,24 +11,25 @@ import { iso } from '#shared/lib';
 // written, so a move has to open its stretch first. The open row is closed and the
 // new one opened in one transaction, at the same instant, so the two meet. Pass
 // `enteredAt` to set that instant — a creation starts its first stretch when the
-// issue itself starts.
+// issue itself starts. Pass `on` when already running inside a caller transaction.
 export async function recordStatusChange(
   issueIds: number[],
   columnId: number,
   enteredAt?: Date,
+  on?: DbExecutor,
 ): Promise<void> {
   if (issueIds.length === 0) return;
-  const [column] = await db
-    .select({ name: projectColumn.name, stateType: projectColumn.stateType })
-    .from(projectColumn)
-    .where(eq(projectColumn.id, columnId));
-  const at = enteredAt ?? sql`now()`;
-  await db.transaction(async (tx) => {
-    await tx
+  const write = async (executor: DbExecutor) => {
+    const [column] = await executor
+      .select({ name: projectColumn.name, stateType: projectColumn.stateType })
+      .from(projectColumn)
+      .where(eq(projectColumn.id, columnId));
+    const at = enteredAt ?? sql`now()`;
+    await executor
       .update(issueStatus)
       .set({ leftAt: at })
       .where(and(inArray(issueStatus.issueId, issueIds), isNull(issueStatus.leftAt)));
-    await tx.insert(issueStatus).values(
+    await executor.insert(issueStatus).values(
       issueIds.map((issueId) => ({
         issueId,
         columnId,
@@ -37,7 +38,12 @@ export async function recordStatusChange(
         enteredAt: at,
       })),
     );
-  });
+  };
+  if (on) {
+    await write(on);
+    return;
+  }
+  await db.transaction(write);
 }
 
 // --- Status timeline --------------------------------------------------------------

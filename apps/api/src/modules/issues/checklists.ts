@@ -1,4 +1,4 @@
-import { db, issueChecklist, issueChecklistItem } from '@repo/db';
+import { db, issueChecklist, issueChecklistItem, type DbExecutor } from '@repo/db';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { HttpError } from '#shared/lib';
 import { recordActivity, recordActivityEntries, rowSide } from './activity';
@@ -73,15 +73,18 @@ export async function getChecklistItemIssueId(itemId: number): Promise<number | 
 // Every checklist of an issue with its items, both in display order. Two reads
 // joined in memory rather than one row-multiplying join, so a checklist with no
 // items still comes back.
-export async function listChecklists(issueId: number): Promise<ChecklistRow[]> {
-  const lists = await db
+export async function listChecklists(
+  issueId: number,
+  on: DbExecutor = db,
+): Promise<ChecklistRow[]> {
+  const lists = await on
     .select(checklistColumns)
     .from(issueChecklist)
     .where(eq(issueChecklist.issueId, issueId))
     .orderBy(asc(issueChecklist.position), asc(issueChecklist.id));
   if (lists.length === 0) return [];
 
-  const items = await db
+  const items = await on
     .select({
       id: issueChecklistItem.id,
       checklistId: issueChecklistItem.checklistId,
