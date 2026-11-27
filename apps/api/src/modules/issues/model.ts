@@ -287,8 +287,36 @@ export const createWorklogBody = t.Object({
 
 export const updateWorklogBody = t.Partial(createWorklogBody);
 
+// FeedItemRow from activity.ts: one timeline entry (comment or change-log).
+// kind is the FeedKind union (a string).
+export const FeedItemResponse = t.Object({
+  id: t.Number(),
+  issueId: t.Number(),
+  kind: t.String(),
+  replyToId: t.Nullable(t.Number()),
+  actorUserId: t.Nullable(t.String()),
+  actorName: t.Nullable(t.String()),
+  body: t.Nullable(t.String()),
+  action: t.Nullable(t.String()),
+  payload: ActivityPayloadResponse,
+  createdAt: t.String(),
+  editedAt: t.Nullable(t.String()),
+});
+
+export const FeedCursorResponse = t.Nullable(t.Object({ ts: t.String(), id: t.Number() }));
+
+// Activity snapshot optionally bundled into GET /issues/:issueId from the same
+// REPEATABLE READ READ ONLY transaction as the issue row and custom fields.
+export const IssueSnapshotActivityResponse = t.Object({
+  items: t.Array(FeedItemResponse),
+  nextCursor: FeedCursorResponse,
+  truncated: t.Boolean(),
+  latestActivityId: t.Nullable(t.Number()),
+});
+
 // GET /issues/:issueId returns the full issue plus its custom field values, its
-// relations to other issues, the members watching it, and its checklists.
+// relations to other issues, the members watching it, its checklists, and
+// optionally its activity feed from the same snapshot when includeActivity='true'.
 export const IssueWithFieldsResponse = t.Composite([
   IssueResponse,
   t.Object({
@@ -299,8 +327,36 @@ export const IssueWithFieldsResponse = t.Composite([
     subtasks: t.Array(IssueRefResponse),
     checklists: t.Array(ChecklistResponse),
     development: t.Array(DevelopmentLinkResponse),
+    activity: t.Optional(IssueSnapshotActivityResponse),
   }),
 ]);
+
+// Optional snapshot-activity query arguments on GET /issues/:issueId.
+export const getIssueQuery = t.Object({
+  includeActivity: t.Optional(
+    t.Union([t.Literal('true'), t.Literal('false')], {
+      description:
+        "Set to 'true' to include the issue's activity feed from the same database snapshot. Default 'false'.",
+    }),
+  ),
+  activityLimit: t.Optional(
+    t.Numeric({
+      description:
+        'Max top-level activity items to include when includeActivity is true (1-200). Default 100.',
+    }),
+  ),
+  activityFilter: t.Optional(
+    t.Union([t.Literal('comments'), t.Literal('history'), t.Literal('worklog')], {
+      description:
+        'Only comments, only the change log without time entries, or only time entries. Omit for every entry.',
+    }),
+  ),
+  activityOrder: t.Optional(
+    t.Union([t.Literal('desc'), t.Literal('asc')], {
+      description: "'desc' (default) serves the newest entries first, 'asc' the oldest.",
+    }),
+  ),
+});
 
 // The board carries each issue's relations on the issue itself.
 export const BoardIssueResponse = t.Composite([
@@ -351,24 +407,6 @@ export const CrossProjectIssueHitResponse = t.Composite([
     teamName: t.String(),
   }),
 ]);
-
-// FeedItemRow from activity.ts: one timeline entry (comment or change-log).
-// kind is the FeedKind union (a string).
-export const FeedItemResponse = t.Object({
-  id: t.Number(),
-  issueId: t.Number(),
-  kind: t.String(),
-  replyToId: t.Nullable(t.Number()),
-  actorUserId: t.Nullable(t.String()),
-  actorName: t.Nullable(t.String()),
-  body: t.Nullable(t.String()),
-  action: t.Nullable(t.String()),
-  payload: ActivityPayloadResponse,
-  createdAt: t.String(),
-  editedAt: t.Nullable(t.String()),
-});
-
-export const FeedCursorResponse = t.Nullable(t.Object({ ts: t.String(), id: t.Number() }));
 
 // FeedPage from activity.ts: one page of the feed with the keyset cursor.
 export const FeedPageResponse = t.Object({
@@ -704,6 +742,15 @@ export const setIssueFieldValueBody = t.Object({
   optionIds: t.Optional(t.Array(t.Integer())),
 });
 
+export const setIssueFieldValueItemBody = t.Object({
+  fieldId: t.Integer({ description: 'Custom field id.' }),
+  value: t.Optional(
+    t.Nullable(t.Union([t.String({ maxLength: ISSUE_TEXT_LIMIT }), t.Number(), t.Boolean()])),
+  ),
+  valueEnd: t.Optional(t.Nullable(t.String())),
+  optionIds: t.Optional(t.Array(t.Integer())),
+});
+
 export const issueFieldParams = t.Object({ issueId: t.Numeric(), fieldId: t.Numeric() });
 
 export const addIssueLinkBody = t.Object({
@@ -744,6 +791,19 @@ const commentText = t.String({
 export const createCommentBody = t.Object({
   body: commentText,
   replyToId: t.Optional(t.Number({ description: 'Reply to this comment of the same issue.' })),
+});
+
+export const setIssueFieldValuesBody = t.Object({
+  fields: t.Array(setIssueFieldValueItemBody, {
+    description: 'Custom field values to set atomically in one transaction.',
+  }),
+  comment: t.Optional(createCommentBody),
+});
+
+export const SetIssueFieldValuesResponse = t.Object({
+  fields: t.Array(IssueFieldValueRow),
+  comment: t.Nullable(FeedItemResponse),
+  latestActivityId: t.Nullable(t.Number()),
 });
 
 export const updateCommentBody = t.Object({

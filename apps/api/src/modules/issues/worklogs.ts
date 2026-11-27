@@ -1,4 +1,4 @@
-import { db, issue, issueWorklog, user } from '@repo/db';
+import { db, issue, issueWorklog, user, type DbExecutor } from '@repo/db';
 import { desc, eq, inArray, sql, type SQLWrapper } from 'drizzle-orm';
 import { HttpError, iso } from '#shared/lib';
 import { recordActivity, timeText } from './activity';
@@ -70,9 +70,10 @@ export async function listWorklogs(issueId: number): Promise<WorklogRow[]> {
 export async function attachLoggedMinutes<T extends { id: number; loggedMinutes: number }>(
   issues: T[],
   ids: number[] | SQLWrapper,
+  on: DbExecutor = db,
 ): Promise<void> {
   if (issues.length === 0) return;
-  const rows = await db
+  const rows = await on
     .select({
       issueId: issueWorklog.issueId,
       minutes: sql<number>`sum(${issueWorklog.minutes})::int`,

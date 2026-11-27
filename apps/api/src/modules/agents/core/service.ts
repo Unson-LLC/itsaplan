@@ -13,6 +13,7 @@ import {
   agentFieldTrigger,
   customField,
   integrationCredential,
+  type DbExecutor,
 } from '@repo/db';
 import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { auth } from '@repo/auth';
@@ -529,8 +530,12 @@ async function setFieldTriggers(
 // True if the user id is the bot user of an agent working in this project. Validates
 // that a delegate is an agent of the project before it is written to an issue, and is
 // what keeps the delegation and field triggers off an agent that is not a member.
-export async function isProjectAgent(projectId: number, userId: string): Promise<boolean> {
-  const rows = await db
+export async function isProjectAgent(
+  projectId: number,
+  userId: string,
+  on: DbExecutor = db,
+): Promise<boolean> {
+  const rows = await on
     .select({ id: aiAgent.id })
     .from(aiAgent)
     .where(and(eq(aiAgent.userId, userId), inProject(projectId)))

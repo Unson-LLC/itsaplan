@@ -1,4 +1,4 @@
-import { db, issue, issueLink, project as projectTable } from '@repo/db';
+import { db, issue, issueLink, project as projectTable, type DbExecutor } from '@repo/db';
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { HttpError } from '#shared/lib';
@@ -69,8 +69,11 @@ function storedLink(
 
 // Every relation the issue takes part in, on either side, ordered by kind and
 // then by the other issue's number.
-export async function listIssueLinks(issueId: number): Promise<IssueLinkRow[]> {
-  const rows = await db
+export async function listIssueLinks(
+  issueId: number,
+  on: DbExecutor = db,
+): Promise<IssueLinkRow[]> {
+  const rows = await on
     .select({
       id: issueLink.id,
       kind: issueLink.kind,

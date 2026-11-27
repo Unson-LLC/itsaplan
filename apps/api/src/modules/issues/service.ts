@@ -19,6 +19,7 @@ import {
   cycle,
   team,
   issueLink,
+  type DbExecutor,
 } from '@repo/db';
 import { alias } from 'drizzle-orm/pg-core';
 import {
@@ -53,15 +54,21 @@ import {
 import {
   recordActivity,
   recordActivityEntries,
-  logIssueUpdate,
+  recordIssueUpdateActivity,
+  notifyIssueUpdateChanges,
+  insertCommentInTx,
+  runCommentCreatedSideEffects,
+  getLatestActivityId,
   labelNames,
   actorId,
   type ActivityActor,
+  type FeedItemRow,
   userName,
   rowSide,
   type ActivityInput,
   type IssueSnapshot,
 } from './activity';
+import { withIssueLockTx } from './tx';
 import { autoWatchIssue } from './watchers';
 import { attachLoggedMinutes } from './worklogs';
 import { recordCycleChange } from './cycle-history';
@@ -198,9 +205,13 @@ function mapIssue(row: typeof issue.$inferSelect, projectKey: string): IssueRow 
 // Sets each issue's statusSince to when it entered the column it is in now, leaving
 // the createdAt default (set by mapIssue) for an issue with no open stretch. One
 // query for the whole set. Mutates the passed issues in place.
-async function attachStatusSince(issues: IssueRow[], ids: number[] | SQLWrapper): Promise<void> {
+async function attachStatusSince(
+  issues: IssueRow[],
+  ids: number[] | SQLWrapper,
+  on: DbExecutor = db,
+): Promise<void> {
   if (issues.length === 0) return;
-  const rows = await db
+  const rows = await on
     .select({ issueId: issueStatus.issueId, enteredAt: issueStatus.enteredAt })
     .from(issueStatus)
     .where(and(inArray(issueStatus.issueId, ids), isNull(issueStatus.leftAt)));
@@ -699,19 +710,22 @@ export async function archiveIssue(
   id: number,
   actorUserId?: string | null,
 ): Promise<IssueRow | null> {
-  const [row] = await db
-    .update(issue)
-    .set({ archivedAt: sql`now()` })
-    .where(and(eq(issue.id, id), isNull(issue.archivedAt)))
-    .returning({ id: issue.id });
-  if (!row) {
-    // Either not found, or already archived. Distinguish so a missing issue 404s.
-    return getIssue(id);
+  const result = await withIssueLockTx(id, async (tx, locked) => {
+    if (!locked) return { changed: false, issue: null as IssueRow | null };
+    const [row] = await tx
+      .update(issue)
+      .set({ archivedAt: sql`now()` })
+      .where(and(eq(issue.id, id), isNull(issue.archivedAt)))
+      .returning({ id: issue.id });
+    if (row) {
+      await recordActivity(id, [{ action: 'archived' }], actorUserId, tx);
+    }
+    return { changed: Boolean(row), issue: await getIssue(id, tx) };
+  });
+  if (result.changed && result.issue) {
+    await emitIssueEvent('issue.updated', result.issue, actorUserId);
   }
-  await recordActivity(id, [{ action: 'archived' }], actorUserId);
-  const archived = await getIssue(id);
-  if (archived) await emitIssueEvent('issue.updated', archived, actorUserId);
-  return archived;
+  return result.issue;
 }
 
 // Restores an archived issue back onto the board (archived_at -> null). Records a
@@ -720,25 +734,35 @@ export async function restoreIssue(
   id: number,
   actorUserId?: string | null,
 ): Promise<IssueRow | null> {
-  const [row] = await db
-    .update(issue)
-    .set({ archivedAt: null })
-    .where(and(eq(issue.id, id), isNotNull(issue.archivedAt)))
-    .returning({ id: issue.id });
-  if (!row) return getIssue(id);
-  await recordActivity(id, [{ action: 'restored' }], actorUserId);
-  const restored = await getIssue(id);
-  if (restored) await emitIssueEvent('issue.updated', restored, actorUserId);
-  return restored;
+  const result = await withIssueLockTx(id, async (tx, locked) => {
+    if (!locked) return { changed: false, issue: null as IssueRow | null };
+    const [row] = await tx
+      .update(issue)
+      .set({ archivedAt: null })
+      .where(and(eq(issue.id, id), isNotNull(issue.archivedAt)))
+      .returning({ id: issue.id });
+    if (row) {
+      await recordActivity(id, [{ action: 'restored' }], actorUserId, tx);
+    }
+    return { changed: Boolean(row), issue: await getIssue(id, tx) };
+  });
+  if (result.changed && result.issue) {
+    await emitIssueEvent('issue.updated', result.issue, actorUserId);
+  }
+  return result.issue;
 }
 
 // Expands what an issue is planned under — its initiative and its cycle — to
 // { id, title, status } / { id, name, status } in place. Both hang off the same issue rows, so one
 // query carries them; an issue linked to neither keeps the nulls mapIssue set.
 // Rendering those names on a board card needs no separate scaffold lookup this way.
-async function attachGroupings(issues: IssueRow[], ids: number[] | SQLWrapper): Promise<void> {
+async function attachGroupings(
+  issues: IssueRow[],
+  ids: number[] | SQLWrapper,
+  on: DbExecutor = db,
+): Promise<void> {
   if (issues.length === 0) return;
-  const rows = await db
+  const rows = await on
     .select({
       issueId: issue.id,
       initiativeId: initiative.id,
@@ -795,14 +819,15 @@ function projectIssueIds(projectId: number, archived: boolean): SQLWrapper {
 async function attachDetails(
   issues: IssueRow[],
   opts: { fieldValues?: boolean; ids?: SQLWrapper } = {},
+  on: DbExecutor = db,
 ) {
   const ids = opts.ids ?? issues.map((i) => i.id);
   await Promise.all([
-    attachLabels(issues, ids),
-    opts.fieldValues ? attachFieldValues(issues, ids) : undefined,
-    attachStatusSince(issues, ids),
-    attachGroupings(issues, ids),
-    attachLoggedMinutes(issues, ids),
+    attachLabels(issues, ids, on),
+    opts.fieldValues ? attachFieldValues(issues, ids, on) : undefined,
+    attachStatusSince(issues, ids, on),
+    attachGroupings(issues, ids, on),
+    attachLoggedMinutes(issues, ids, on),
   ]);
 }
 
@@ -811,9 +836,10 @@ async function attachDetails(
 async function attachLabels<T extends { id: number; labelIds: number[] }>(
   issues: T[],
   ids: number[] | SQLWrapper = issues.map((i) => i.id),
+  on: DbExecutor = db,
 ): Promise<void> {
   if (issues.length === 0) return;
-  const rows = await db
+  const rows = await on
     .select({ issueId: issueLabel.issueId, labelId: issueLabel.labelId })
     .from(issueLabel)
     .where(inArray(issueLabel.issueId, ids));
@@ -833,10 +859,11 @@ async function attachLabels<T extends { id: number; labelIds: number[] }>(
 async function attachFieldValues(
   issues: IssueRow[],
   issueIds: number[] | SQLWrapper,
+  on: DbExecutor = db,
 ): Promise<void> {
   if (issues.length === 0) return;
   const [scalarRows, optionRows] = await Promise.all([
-    db
+    on
       .select({
         issueId: issueFieldValue.issueId,
         fieldId: issueFieldValue.fieldId,
@@ -850,7 +877,7 @@ async function attachFieldValues(
       })
       .from(issueFieldValue)
       .where(inArray(issueFieldValue.issueId, issueIds)),
-    db
+    on
       .select({
         issueId: issueFieldOption.issueId,
         fieldId: issueFieldOption.fieldId,
@@ -891,8 +918,9 @@ async function attachFieldValues(
 // against.
 async function loadSnapshot(
   id: number,
+  on: DbExecutor = db,
 ): Promise<(IssueSnapshot & { projectId: number; parentId: number | null }) | null> {
-  const rows = await db
+  const rows = await on
     .select({
       id: issue.id,
       projectId: issue.projectId,
@@ -917,22 +945,22 @@ async function loadSnapshot(
   return row ? { ...row, estimatePoints: numOrNull(row.estimatePoints) } : null;
 }
 
-export async function getIssue(id: number): Promise<IssueRow | null> {
-  return (await getIssues([id]))[0] ?? null;
+export async function getIssue(id: number, on: DbExecutor = db): Promise<IssueRow | null> {
+  return (await getIssues([id], on))[0] ?? null;
 }
 
 // Several issues at once, in no particular order. The per-issue enrichment is
 // batched, so this costs what a single getIssue does however many ids it is given
 // — which is what makes it worth using for the writes that touch two issues.
-export async function getIssues(ids: number[]): Promise<IssueRow[]> {
+export async function getIssues(ids: number[], on: DbExecutor = db): Promise<IssueRow[]> {
   if (ids.length === 0) return [];
-  const rows = await db
+  const rows = await on
     .select({ issue, projectKey: projectTable.key })
     .from(issue)
     .innerJoin(projectTable, eq(projectTable.id, issue.projectId))
     .where(inArray(issue.id, ids));
   const issues = rows.map((row) => mapIssue(row.issue, row.projectKey));
-  await attachDetails(issues);
+  await attachDetails(issues, {}, on);
   return issues;
 }
 
@@ -944,8 +972,9 @@ export async function getIssues(ids: number[]): Promise<IssueRow[]> {
 export async function getIssueBySequence(
   projectId: number,
   sequenceNumber: number,
+  on: DbExecutor = db,
 ): Promise<IssueRow | null> {
-  const rows = await db
+  const rows = await on
     .select({ issue, projectKey: projectTable.key })
     .from(issue)
     .innerJoin(projectTable, eq(projectTable.id, issue.projectId))
@@ -953,7 +982,7 @@ export async function getIssueBySequence(
       or(
         and(eq(issue.projectId, projectId), eq(issue.sequenceNumber, sequenceNumber)),
         exists(
-          db
+          on
             .select({ id: issueKeyAlias.issueId })
             .from(issueKeyAlias)
             .where(
@@ -968,7 +997,7 @@ export async function getIssueBySequence(
     );
   if (!rows[0]) return null;
   const mapped = mapIssue(rows[0].issue, rows[0].projectKey);
-  await attachDetails([mapped]);
+  await attachDetails([mapped], {}, on);
   return mapped;
 }
 
@@ -1231,10 +1260,10 @@ export async function createIssue(
 
 // The identifiers ("MKT-42") of the given issues, for the activity entries a parent
 // change writes. An id with no issue is absent from the map.
-async function identifiers(ids: number[]): Promise<Map<number, string>> {
+async function identifiers(ids: number[], on: DbExecutor = db): Promise<Map<number, string>> {
   const out = new Map<number, string>();
   if (ids.length === 0) return out;
-  const rows = await db
+  const rows = await on
     .select({ id: issue.id, key: projectTable.key, seq: issue.sequenceNumber })
     .from(issue)
     .innerJoin(projectTable, eq(projectTable.id, issue.projectId))
@@ -1250,9 +1279,11 @@ export async function recordParentChange(
   before: number | null,
   after: number | null,
   actor?: ActivityActor,
+  on: DbExecutor = db,
 ): Promise<void> {
   const names = await identifiers(
     [childId, before, after].filter((id): id is number => id !== null),
+    on,
   );
   const child = rowSide(names.get(childId), childId);
   const parentSide = (id: number | null) => rowSide(id === null ? null : names.get(id), id);
@@ -1272,7 +1303,7 @@ export async function recordParentChange(
       issueId: after,
       event: { action: 'subtask_add', to: child },
     });
-  await recordActivityEntries(entries, actor);
+  await recordActivityEntries(entries, actor, on);
 }
 
 export interface IssuePatch {
@@ -1308,88 +1339,120 @@ export async function updateIssue(
   actor?: ActivityActor,
   opts?: { onlyIfColumnId?: number; skipIfColumnFull?: boolean },
 ): Promise<IssueRow | null> {
-  const before = await loadSnapshot(id);
-  if (!before) return null;
+  const initial = await loadSnapshot(id);
+  if (!initial) return null;
 
   // Each date is checked against the effective other one: a patch sets one date
   // and leaves the stored value of the other in force.
   assertDateOrder(
-    patch.startDate !== undefined ? patch.startDate : before.startDate,
-    patch.dueDate !== undefined ? patch.dueDate : before.dueDate,
+    patch.startDate !== undefined ? patch.startDate : initial.startDate,
+    patch.dueDate !== undefined ? patch.dueDate : initial.dueDate,
   );
-  await assertAssignments(before.projectId, patch);
-  await assertInitiative(before.projectId, patch.initiativeId);
-  await assertCycle(before.projectId, patch.cycleId, before.cycleId);
-  await assertColumn(before.projectId, patch.columnId);
-  const movedToColumnId =
-    patch.columnId !== undefined && patch.columnId !== before.columnId ? patch.columnId : null;
+  await assertAssignments(initial.projectId, patch);
+  await assertInitiative(initial.projectId, patch.initiativeId);
+  await assertCycle(initial.projectId, patch.cycleId, initial.cycleId);
+  await assertColumn(initial.projectId, patch.columnId);
+  const initialMovedToColumnId =
+    patch.columnId !== undefined && patch.columnId !== initial.columnId ? patch.columnId : null;
   // Only a move into a different column consumes capacity, so re-saving an issue
   // that already sits in a full column is never refused.
-  if (movedToColumnId !== null) {
-    const breach = await wipLimitBreach(movedToColumnId);
+  if (initialMovedToColumnId !== null) {
+    const breach = await wipLimitBreach(initialMovedToColumnId);
     if (breach && !opts?.skipIfColumnFull) throw breach;
     if (breach) return getIssue(id);
   }
-  await assertIssueType(before.projectId, patch.typeId);
-  await assertParent(before.projectId, id, patch.parentId);
+  await assertIssueType(initial.projectId, patch.typeId);
+  await assertParent(initial.projectId, id, patch.parentId);
 
   // An assignee sent with the same move wins over the column's auto-assignee.
   const autoAssignee =
-    movedToColumnId !== null &&
+    initialMovedToColumnId !== null &&
     patch.assigneeUserId === undefined &&
-    !(await usesAssignmentQueue(before.projectId))
-      ? await columnAutoAssignee(movedToColumnId)
+    !(await usesAssignmentQueue(initial.projectId))
+      ? await columnAutoAssignee(initialMovedToColumnId)
       : null;
 
-  const set: Partial<typeof issue.$inferInsert> = {};
-  if (patch.columnId !== undefined) set.columnId = patch.columnId;
-  if (patch.position !== undefined) set.position = patch.position;
-  if (patch.typeId !== undefined) set.typeId = patch.typeId;
-  if (patch.parentId !== undefined) set.parentId = patch.parentId;
-  if (patch.initiativeId !== undefined) set.initiativeId = patch.initiativeId;
-  if (patch.cycleId !== undefined) set.cycleId = patch.cycleId;
-  if (patch.assigneeUserId !== undefined) set.assigneeUserId = patch.assigneeUserId;
-  else if (autoAssignee) set.assigneeUserId = autoAssignee;
-  if (patch.delegateUserId !== undefined) set.delegateUserId = patch.delegateUserId;
-  if (patch.title !== undefined) set.title = patch.title;
-  if (patch.description !== undefined) set.description = patch.description;
-  if (patch.priority !== undefined) set.priority = patch.priority;
-  if (patch.estimatePoints !== undefined)
-    set.estimatePoints = patch.estimatePoints == null ? null : String(patch.estimatePoints);
-  if (patch.estimateMinutes !== undefined) set.estimateMinutes = patch.estimateMinutes;
-  if (patch.startDate !== undefined) set.startDate = patch.startDate;
-  if (patch.dueDate !== undefined) set.dueDate = patch.dueDate;
+  const outcome = await withIssueLockTx(id, async (tx, locked) => {
+    if (!locked) return null;
+    const before = await loadSnapshot(id, tx);
+    if (!before) return null;
 
-  const changed = Object.keys(set).length > 0;
-  if (changed) {
-    set.updatedAt = sql`now()` as unknown as Date;
-    const guard =
-      opts?.onlyIfColumnId == null
-        ? eq(issue.id, id)
-        : and(eq(issue.id, id), eq(issue.columnId, opts.onlyIfColumnId));
-    const updated = await db.update(issue).set(set).where(guard).returning({ id: issue.id });
-    if (updated.length === 0) return getIssue(id);
-  }
-  const after = await getIssue(id);
-  if (after) {
-    const afterSnapshot = snapshot(after);
-    if (before.columnId !== afterSnapshot.columnId)
-      await recordStatusChange([id], afterSnapshot.columnId);
-    await logIssueUpdate(before, afterSnapshot, actor);
-    await recordCycleChange(id, before.cycleId, afterSnapshot.cycleId);
-    if (before.parentId !== after.parentId)
-      await recordParentChange(id, before.parentId, after.parentId, actor);
+    assertDateOrder(
+      patch.startDate !== undefined ? patch.startDate : before.startDate,
+      patch.dueDate !== undefined ? patch.dueDate : before.dueDate,
+    );
+
+    const movedToColumnId =
+      patch.columnId !== undefined && patch.columnId !== before.columnId ? patch.columnId : null;
+
+    const set: Partial<typeof issue.$inferInsert> = {};
+    if (patch.columnId !== undefined) set.columnId = patch.columnId;
+    if (patch.position !== undefined) set.position = patch.position;
+    if (patch.typeId !== undefined) set.typeId = patch.typeId;
+    if (patch.parentId !== undefined) set.parentId = patch.parentId;
+    if (patch.initiativeId !== undefined) set.initiativeId = patch.initiativeId;
+    if (patch.cycleId !== undefined) set.cycleId = patch.cycleId;
+    if (patch.assigneeUserId !== undefined) set.assigneeUserId = patch.assigneeUserId;
+    else if (movedToColumnId !== null && autoAssignee) set.assigneeUserId = autoAssignee;
+    if (patch.delegateUserId !== undefined) set.delegateUserId = patch.delegateUserId;
+    if (patch.title !== undefined) set.title = patch.title;
+    if (patch.description !== undefined) set.description = patch.description;
+    if (patch.priority !== undefined) set.priority = patch.priority;
+    if (patch.estimatePoints !== undefined)
+      set.estimatePoints = patch.estimatePoints == null ? null : String(patch.estimatePoints);
+    if (patch.estimateMinutes !== undefined) set.estimateMinutes = patch.estimateMinutes;
+    if (patch.startDate !== undefined) set.startDate = patch.startDate;
+    if (patch.dueDate !== undefined) set.dueDate = patch.dueDate;
+
+    const changed = Object.keys(set).length > 0;
     if (changed) {
-      await emitIssueEvent('issue.updated', after, actor);
-      // Granular events fire in addition to issue.updated when their field changed.
-      if (before.assigneeUserId !== after.assigneeUserId)
-        await emitIssueEvent('issue.assigned', after, actor);
-      if (before.delegateUserId !== after.delegateUserId) await enqueueDelegateRun(after, actor);
-      if (before.columnId !== after.columnId) {
-        await emitIssueEvent('issue.state_changed', after, actor);
-        await queueStatusRuns([id], after.columnId, actorId(actor));
-        await applySubtaskAutomation(after, actor);
+      set.updatedAt = sql`now()` as unknown as Date;
+      const guard =
+        opts?.onlyIfColumnId == null
+          ? eq(issue.id, id)
+          : and(eq(issue.id, id), eq(issue.columnId, opts.onlyIfColumnId));
+      const updated = await tx.update(issue).set(set).where(guard).returning({ id: issue.id });
+      if (updated.length === 0) {
+        return { applied: false as const, after: await getIssue(id, tx) };
       }
+    }
+
+    if (movedToColumnId !== null) {
+      await recordStatusChange([id], movedToColumnId, undefined, tx);
+    }
+    const after = await getIssue(id, tx);
+    if (!after) return null;
+    const afterSnapshot = snapshot(after);
+    const insertedActivities = await recordIssueUpdateActivity(before, afterSnapshot, actor, tx);
+    await recordCycleChange(id, before.cycleId, afterSnapshot.cycleId, tx);
+    if (before.parentId !== after.parentId) {
+      await recordParentChange(id, before.parentId, after.parentId, actor, tx);
+    }
+    return {
+      applied: true as const,
+      before,
+      after,
+      afterSnapshot,
+      changed,
+      insertedActivities,
+    };
+  });
+
+  if (!outcome) return null;
+  if (!outcome.applied) return outcome.after;
+
+  const { before, after, afterSnapshot, changed, insertedActivities } = outcome;
+  await notifyIssueUpdateChanges(after.projectId, before, afterSnapshot, insertedActivities, actor);
+  if (changed) {
+    await emitIssueEvent('issue.updated', after, actor);
+    // Granular events fire in addition to issue.updated when their field changed.
+    if (before.assigneeUserId !== after.assigneeUserId)
+      await emitIssueEvent('issue.assigned', after, actor);
+    if (before.delegateUserId !== after.delegateUserId) await enqueueDelegateRun(after, actor);
+    if (before.columnId !== after.columnId) {
+      await emitIssueEvent('issue.state_changed', after, actor);
+      await queueStatusRuns([id], after.columnId, actorId(actor));
+      await applySubtaskAutomation(after, actor);
     }
   }
   return after;
@@ -1452,49 +1515,54 @@ export async function setIssueLabels(
   emitEvent = true,
 ): Promise<void> {
   await assertIssueLabels(projectId, labelIds);
-  const beforeRows = await db
-    .select({ labelId: issueLabel.labelId })
-    .from(issueLabel)
-    .where(eq(issueLabel.issueId, issueId));
-  const before = beforeRows.map((r) => r.labelId);
   const next = [...new Set(labelIds)];
 
-  await db.delete(issueLabel).where(eq(issueLabel.issueId, issueId));
-  if (next.length) {
-    await db
-      .insert(issueLabel)
-      .values(next.map((labelId) => ({ issueId, labelId })))
-      .onConflictDoNothing();
-  }
+  const result = await withIssueLockTx(issueId, async (tx, locked) => {
+    if (!locked) return null;
+    const beforeRows = await tx
+      .select({ labelId: issueLabel.labelId })
+      .from(issueLabel)
+      .where(eq(issueLabel.issueId, issueId));
+    const before = beforeRows.map((r) => r.labelId);
 
-  const added = next.filter((x) => !before.includes(x));
-  const removed = before.filter((x) => !next.includes(x));
-
-  // A label change is an edit of the issue, and sorting by "recently updated" has
-  // to place it accordingly.
-  if (added.length > 0 || removed.length > 0) {
-    await db
-      .update(issue)
-      .set({ updatedAt: sql`now()` })
-      .where(eq(issue.id, issueId));
-  }
-
-  const names = await labelNames(projectId, [...added, ...removed]);
-  const events: ActivityInput[] = [];
-  for (const labelId of added)
-    events.push({ action: 'label_add', to: rowSide(names.get(labelId), labelId) });
-  for (const labelId of removed)
-    events.push({ action: 'label_remove', from: rowSide(names.get(labelId), labelId) });
-  await recordActivity(issueId, events, actorUserId);
-
-  if (emitEvent && (added.length > 0 || removed.length > 0)) {
-    const issueRow = await getIssue(issueId);
-    if (issueRow) {
-      const named = (ids: number[]) => ids.map((id) => ({ id, name: names.get(id) ?? null }));
-      await emitIssueEvent('issue.label_changed', issueRow, actorUserId, {
-        labelChange: { added: named(added), removed: named(removed) },
-      });
+    await tx.delete(issueLabel).where(eq(issueLabel.issueId, issueId));
+    if (next.length) {
+      await tx
+        .insert(issueLabel)
+        .values(next.map((labelId) => ({ issueId, labelId })))
+        .onConflictDoNothing();
     }
+
+    const added = next.filter((x) => !before.includes(x));
+    const removed = before.filter((x) => !next.includes(x));
+
+    // A label change is an edit of the issue, and sorting by "recently updated" has
+    // to place it accordingly.
+    if (added.length > 0 || removed.length > 0) {
+      await tx
+        .update(issue)
+        .set({ updatedAt: sql`now()` })
+        .where(eq(issue.id, issueId));
+    }
+
+    const names = await labelNames(projectId, [...added, ...removed], tx);
+    const events: ActivityInput[] = [];
+    for (const labelId of added)
+      events.push({ action: 'label_add', to: rowSide(names.get(labelId), labelId) });
+    for (const labelId of removed)
+      events.push({ action: 'label_remove', from: rowSide(names.get(labelId), labelId) });
+    await recordActivity(issueId, events, actorUserId, tx);
+
+    const issueRow =
+      emitEvent && (added.length > 0 || removed.length > 0) ? await getIssue(issueId, tx) : null;
+    return { added, removed, names, issueRow };
+  });
+
+  if (result?.issueRow) {
+    const named = (ids: number[]) => ids.map((id) => ({ id, name: result.names.get(id) ?? null }));
+    await emitIssueEvent('issue.label_changed', result.issueRow, actorUserId, {
+      labelChange: { added: named(result.added), removed: named(result.removed) },
+    });
   }
 }
 
@@ -1673,8 +1741,11 @@ function pickScalarValue(row: {
 // The fields of the issue's project that apply to it (the project-wide ones plus
 // its type's own), each joined with whatever value has been set for it (null if
 // unset).
-export async function getIssueFieldValues(issueId: number): Promise<IssueFieldValueRow[]> {
-  const rows = await db
+export async function getIssueFieldValues(
+  issueId: number,
+  on: DbExecutor = db,
+): Promise<IssueFieldValueRow[]> {
+  const rows = await on
     .select({
       fieldId: customField.id,
       name: customField.name,
@@ -1702,7 +1773,7 @@ export async function getIssueFieldValues(issueId: number): Promise<IssueFieldVa
     .where(eq(issue.id, issueId))
     .orderBy(customField.position);
 
-  const optionRows = await db
+  const optionRows = await on
     .select({ fieldId: issueFieldOption.fieldId, optionId: issueFieldOption.optionId })
     .from(issueFieldOption)
     .where(eq(issueFieldOption.issueId, issueId));
@@ -1765,13 +1836,14 @@ async function assertFieldMember(
   projectId: number,
   scope: MemberScope | null,
   userId: string,
+  on: DbExecutor = db,
 ): Promise<void> {
-  const isAgent = await isProjectAgent(projectId, userId);
+  const isAgent = await isProjectAgent(projectId, userId, on);
   if (scope === 'agents') {
     if (!isAgent) throw new HttpError(400, 'This field takes an agent of this project');
     return;
   }
-  if (!(await getMembership(projectId, userId)) || (scope === 'humans' && isAgent)) {
+  if (!(await getMembership(projectId, userId, on)) || (scope === 'humans' && isAgent)) {
     throw new HttpError(400, 'This field takes a member of this project');
   }
 }
@@ -1823,8 +1895,12 @@ async function notifyFieldMember(
 }
 
 // The user id a member field currently holds on an issue, null when it is unset.
-async function fieldMemberUserId(issueId: number, fieldId: number): Promise<string | null> {
-  const [row] = await db
+async function fieldMemberUserId(
+  issueId: number,
+  fieldId: number,
+  on: DbExecutor = db,
+): Promise<string | null> {
+  const [row] = await on
     .select({ valueUserId: issueFieldValue.valueUserId })
     .from(issueFieldValue)
     .where(and(eq(issueFieldValue.issueId, issueId), eq(issueFieldValue.fieldId, fieldId)));
@@ -1832,31 +1908,50 @@ async function fieldMemberUserId(issueId: number, fieldId: number): Promise<stri
 }
 
 // The text a markdown field currently holds on an issue, empty when it is unset.
-async function fieldMarkdown(issueId: number, fieldId: number): Promise<string> {
-  const [row] = await db
+async function fieldMarkdown(
+  issueId: number,
+  fieldId: number,
+  on: DbExecutor = db,
+): Promise<string> {
+  const [row] = await on
     .select({ valueText: issueFieldValue.valueText })
     .from(issueFieldValue)
     .where(and(eq(issueFieldValue.issueId, issueId), eq(issueFieldValue.fieldId, fieldId)));
   return row?.valueText ?? '';
 }
 
-// Sets one field's value on one issue. projectId is the issue's project: the field
-// is resolved inside it, so a field id belonging to another project does not match.
-// For select/multi_select fields, pass optionIds (replaces the full selection); for
-// every other field type, pass value matching the field's type. A datetime_range
-// takes its end in valueEnd.
-export async function setIssueFieldValue(
+export interface SetIssueFieldValueInput {
+  value?: string | number | boolean | null;
+  valueEnd?: string | null;
+  optionIds?: number[];
+}
+
+export interface SetIssueFieldValueItemInput extends SetIssueFieldValueInput {
+  fieldId: number;
+}
+
+interface FieldWriteSideEffect {
+  field: CustomFieldRow;
+  entryId: number | null;
+  memberUserId: string | null;
+  previousMemberUserId: string | null;
+  previousMarkdown: string;
+  markdownAfter: string;
+}
+
+// Validates and applies one custom field write plus its action='field' activity
+// row inside an existing locked issue transaction. Post-commit side effects
+// (field agent runs, member notifications, markdown mention notifications) are
+// returned for execution after the transaction commits.
+async function applyIssueFieldValueInTx(
+  tx: DbExecutor,
   projectId: number,
   issueId: number,
   fieldId: number,
-  input: {
-    value?: string | number | boolean | null;
-    valueEnd?: string | null;
-    optionIds?: number[];
-  },
+  input: SetIssueFieldValueInput,
   actorUserId?: string | null,
-): Promise<void> {
-  const field = await getCustomFieldById(projectId, fieldId);
+): Promise<FieldWriteSideEffect> {
+  const field = await getCustomFieldById(projectId, fieldId, tx);
   if (!field) throw new HttpError(404, 'Custom field not found');
 
   // A url field stores its value as text but must hold a valid http(s) URL.
@@ -1871,17 +1966,17 @@ export async function setIssueFieldValue(
     field.fieldType === 'member' && typeof input.value === 'string' && input.value !== ''
       ? input.value
       : null;
-  if (memberUserId) await assertFieldMember(projectId, field.memberScope, memberUserId);
+  if (memberUserId) await assertFieldMember(projectId, field.memberScope, memberUserId, tx);
 
   // The markdown a field held before this write, so only the mentions the write
   // adds reach anyone.
   const previousMarkdown =
-    field.fieldType === 'markdown' ? await fieldMarkdown(issueId, fieldId) : '';
+    field.fieldType === 'markdown' ? await fieldMarkdown(issueId, fieldId, tx) : '';
 
   // Who the member field held before this write. A write that sets the same person
   // again starts no run and tells nobody.
   const previousMemberUserId =
-    field.fieldType === 'member' ? await fieldMemberUserId(issueId, fieldId) : null;
+    field.fieldType === 'member' ? await fieldMemberUserId(issueId, fieldId, tx) : null;
 
   // The display-ready new value logged to the activity feed: option value names for
   // select/multi_select, the raw value for everything else. loggedId is the row that
@@ -1891,7 +1986,7 @@ export async function setIssueFieldValue(
   let loggedId: number | string | null = null;
 
   if (field.fieldType === 'select' || field.fieldType === 'multi_select') {
-    const optionIds = input.optionIds ?? [];
+    const optionIds = [...new Set(input.optionIds ?? [])];
     // An option must be one of this field's own: the issue_field_option foreign key
     // only requires it to exist somewhere. Resolved before the delete so a rejected
     // request leaves the current selection untouched.
@@ -1901,11 +1996,11 @@ export async function setIssueFieldValue(
       return option.value;
     });
 
-    await db
+    await tx
       .delete(issueFieldOption)
       .where(and(eq(issueFieldOption.issueId, issueId), eq(issueFieldOption.fieldId, fieldId)));
     if (optionIds.length) {
-      await db
+      await tx
         .insert(issueFieldOption)
         .values(optionIds.map((optionId) => ({ issueId, fieldId, optionId })));
     }
@@ -1944,7 +2039,7 @@ export async function setIssueFieldValue(
       default:
         column = { valueText: (input.value as string) ?? null };
     }
-    await db
+    await tx
       .insert(issueFieldValue)
       .values({ issueId, fieldId, ...column })
       .onConflictDoUpdate({
@@ -1955,7 +2050,7 @@ export async function setIssueFieldValue(
     if (value == null || value === '') {
       loggedValue = null;
     } else if (field.fieldType === 'member') {
-      loggedValue = await userName(memberUserId);
+      loggedValue = await userName(memberUserId, tx);
       loggedId = memberUserId;
     } else if (field.fieldType === 'boolean') {
       loggedValue = value ? 'true' : 'false';
@@ -1976,23 +2071,119 @@ export async function setIssueFieldValue(
       },
     ],
     actorUserId,
+    tx,
   );
 
-  if (memberUserId && memberUserId !== previousMemberUserId) {
-    await enqueueFieldRun(projectId, issueId, field, memberUserId, actorUserId);
-    await notifyFieldMember(projectId, issueId, memberUserId, entry?.id ?? null, actorUserId);
+  return {
+    field,
+    entryId: entry?.id ?? null,
+    memberUserId,
+    previousMemberUserId,
+    previousMarkdown,
+    markdownAfter: typeof input.value === 'string' ? input.value : '',
+  };
+}
+
+// Runs post-commit side effects for one custom field write outside any transaction.
+async function runFieldWriteSideEffects(
+  projectId: number,
+  issueId: number,
+  effect: FieldWriteSideEffect,
+  actorUserId?: string | null,
+): Promise<void> {
+  if (effect.memberUserId && effect.memberUserId !== effect.previousMemberUserId) {
+    await enqueueFieldRun(projectId, issueId, effect.field, effect.memberUserId, actorUserId);
+    await notifyFieldMember(projectId, issueId, effect.memberUserId, effect.entryId, actorUserId);
   }
 
   // A markdown field is written in the same editor as the description and reaches
   // the people it mentions the same way.
-  if (field.fieldType === 'markdown') {
+  if (effect.field.fieldType === 'markdown') {
     await notifyTextMentions({
       projectId,
       issueId,
       actorUserId: actorUserId ?? null,
-      sourceActivityId: entry?.id ?? null,
-      before: previousMarkdown,
-      after: typeof input.value === 'string' ? input.value : '',
+      sourceActivityId: effect.entryId,
+      before: effect.previousMarkdown,
+      after: effect.markdownAfter,
     });
   }
+}
+
+// Sets one field's value on one issue. projectId is the issue's project: the field
+// is resolved inside it, so a field id belonging to another project does not match.
+// For select/multi_select fields, pass optionIds (replaces the full selection); for
+// every other field type, pass value matching the field's type. A datetime_range
+// takes its end in valueEnd.
+export async function setIssueFieldValue(
+  projectId: number,
+  issueId: number,
+  fieldId: number,
+  input: SetIssueFieldValueInput,
+  actorUserId?: string | null,
+): Promise<void> {
+  const effect = await withIssueLockTx(issueId, async (tx, locked) => {
+    if (!locked) throw new HttpError(404, 'Issue not found');
+    return applyIssueFieldValueInTx(tx, projectId, issueId, fieldId, input, actorUserId);
+  });
+
+  await runFieldWriteSideEffects(projectId, issueId, effect, actorUserId);
+}
+
+export interface SetIssueFieldValuesResult {
+  fields: IssueFieldValueRow[];
+  comment: FeedItemRow | null;
+  latestActivityId: number | null;
+}
+
+// Atomically sets multiple custom fields and an optional comment on one issue
+// under a single FOR UPDATE lock transaction. Any validation error in any field
+// or in the comment rolls back the entire transaction; all webhooks, runs, and
+// notifications fire only after commit.
+export async function setIssueFieldValues(
+  projectId: number,
+  issueId: number,
+  input: {
+    fields: SetIssueFieldValueItemInput[];
+    comment?: { body: string; replyToId?: number };
+  },
+  actorUserId?: string | null,
+): Promise<SetIssueFieldValuesResult> {
+  const { fields, comment, latestActivityId, sideEffects } = await withIssueLockTx(
+    issueId,
+    async (tx, locked) => {
+      if (!locked) throw new HttpError(404, 'Issue not found');
+      const effects: FieldWriteSideEffect[] = [];
+      for (const item of input.fields) {
+        effects.push(
+          await applyIssueFieldValueInTx(tx, projectId, issueId, item.fieldId, item, actorUserId),
+        );
+      }
+      const createdComment = input.comment
+        ? await insertCommentInTx(tx, {
+            issueId,
+            actorUserId,
+            body: input.comment.body,
+            replyToId: input.comment.replyToId,
+          })
+        : null;
+      const updatedFields = await getIssueFieldValues(issueId, tx);
+      const latestId = await getLatestActivityId(issueId, tx);
+      return {
+        fields: updatedFields,
+        comment: createdComment,
+        latestActivityId: latestId,
+        sideEffects: effects,
+      };
+    },
+  );
+
+  for (const effect of sideEffects) {
+    await runFieldWriteSideEffects(projectId, issueId, effect, actorUserId);
+  }
+  if (comment) {
+    await runCommentCreatedSideEffects(projectId, comment, actorUserId ?? null, false);
+  }
+
+  return { fields, comment, latestActivityId };
 }

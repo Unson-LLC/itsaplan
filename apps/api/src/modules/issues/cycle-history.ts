@@ -1,4 +1,4 @@
-import { db, cycle, issueCycle } from '@repo/db';
+import { db, cycle, issueCycle, type DbExecutor } from '@repo/db';
 import { and, asc, eq, isNull, or, sql } from 'drizzle-orm';
 import { iso } from '#shared/lib';
 import { cycleStatus, type CycleStatus } from '#modules/cycles/service';
@@ -25,10 +25,11 @@ export async function recordCycleChange(
   issueId: number,
   before: number | null,
   after: number | null,
+  on: DbExecutor = db,
 ): Promise<void> {
   if (before === after) return;
   if (before !== null) {
-    await db
+    await on
       .update(issueCycle)
       .set({ leftAt: sql`now()` })
       .where(
@@ -42,7 +43,7 @@ export async function recordCycleChange(
   if (after !== null) {
     // An open record for this pair already exists when the issue moved back onto a
     // cycle it never left in the table.
-    await db.insert(issueCycle).values({ issueId, cycleId: after }).onConflictDoNothing();
+    await on.insert(issueCycle).values({ issueId, cycleId: after }).onConflictDoNothing();
   }
 }
 
