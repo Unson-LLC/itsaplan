@@ -24,7 +24,7 @@ export const agentRunnerRoutes = new Elysia({
 
   .post('/agent-runs/claim', async ({ agent }) => ({ run: await claimRunnerRun(agent) }), {
     runnerAgent: true,
-    response: { 200: ClaimResponse, ...errors(401, 403, 409) },
+    response: { 200: ClaimResponse, ...errors(401, 403, 409, 429) },
     detail: {
       summary: 'Claim the next run',
       description:
